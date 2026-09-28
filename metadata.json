@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Advanced Security Toolkit",
+  "description": "An interactive, multi-module cybersecurity suite featuring Google Drive cloud evidence storage, SMT formal verification (Z3/angr constant-time proving), static analysis, cryptographic validation, file entropy visualization, and threat monitoring.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
