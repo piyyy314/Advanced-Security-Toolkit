@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Terminal, Play, AlertTriangle, CheckCircle, ShieldAlert, Zap, FileCode, Trash2, RefreshCw } from 'lucide-react';
 import ExportButton from './ExportButton';
@@ -22,6 +22,15 @@ export default function PenetrationFramework({ triggerToast }: PenetrationFramew
   ]);
   const [isRunning, setIsRunning] = useState(false);
   const [isSuccess, setIsSuccess] = useState<boolean | null>(null);
+  const launchTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (launchTimerRef.current) {
+        clearInterval(launchTimerRef.current);
+      }
+    };
+  }, []);
 
   const exploitCatalog = [
     {
@@ -53,6 +62,9 @@ export default function PenetrationFramework({ triggerToast }: PenetrationFramew
   };
 
   const handleLaunch = () => {
+    if (launchTimerRef.current) {
+      clearInterval(launchTimerRef.current);
+    }
     setIsRunning(true);
     setIsSuccess(null);
     setConsoleLogs(prev => [
@@ -64,16 +76,19 @@ export default function PenetrationFramework({ triggerToast }: PenetrationFramew
     ]);
 
     let step = 0;
-    const interval = setInterval(() => {
+    launchTimerRef.current = setInterval(() => {
       step++;
       if (step === 1) {
         setConsoleLogs(prev => [...prev, `[>] Frame offset 0x0000 matched. Attenuation: ${customParams.attenuation} dB.`]);
       } else if (step === 2) {
         setConsoleLogs(prev => [...prev, `[>] Transponder receiver ack feedback: 0xEE (VULNERABLE MEMORY SPACE FOUND)`]);
       } else if (step === 3) {
-        setConsoleLogs(prev => [...prev, `[+] Executing shell payload payload... hijacking thread context.`]);
+        setConsoleLogs(prev => [...prev, `[+] Executing shell payload... hijacking thread context.`]);
       } else if (step === 4) {
-        clearInterval(interval);
+        if (launchTimerRef.current) {
+          clearInterval(launchTimerRef.current);
+          launchTimerRef.current = null;
+        }
         setIsRunning(false);
         const success = Math.random() > 0.15; // 85% success simulation
         setIsSuccess(success);

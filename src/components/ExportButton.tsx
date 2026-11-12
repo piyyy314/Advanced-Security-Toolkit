@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Download, FileJson, FileSpreadsheet, FileText, Copy, Check, ChevronDown } from 'lucide-react';
-import { exportAsJson, exportAsCsv, exportAsText, copyToClipboard } from '../utils/exportUtils';
+import { Download, FileJson, FileSpreadsheet, FileText, FileDown, Copy, Check, ChevronDown } from 'lucide-react';
+import { exportAsJson, exportAsCsv, exportAsText, exportGenericReportPdf, copyToClipboard } from '../utils/exportUtils';
 
 export interface ExportButtonProps {
   label?: string;
@@ -81,6 +81,15 @@ export default function ExportButton({
     setIsOpen(false);
   };
 
+  const handleExportPdf = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!jsonData && !csvData && !textReport) return;
+    const payload = jsonData || csvData;
+    exportGenericReportPdf(label, payload, textReport, `${filenamePrefix}_${timestamp}.pdf`);
+    if (triggerToast) triggerToast(`Exported ${filenamePrefix}.pdf formal report successfully`);
+    setIsOpen(false);
+  };
+
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
     let textToCopy = textReport;
@@ -114,8 +123,8 @@ export default function ExportButton({
     ghost: 'bg-white/5 hover:bg-white/10 text-zinc-300 border border-white/10 hover:border-white/20'
   }[variant];
 
-  // If only one export format is supported, direct download on click
-  const hasMultiple = (jsonData ? 1 : 0) + (csvData ? 1 : 0) + (textReport ? 1 : 0) > 1 || Boolean(jsonData);
+  // PDF + Text + JSON/CSV options mean dropdown is available whenever any data is provided
+  const hasMultiple = Boolean(jsonData || csvData || textReport);
 
   return (
     <div className={`relative inline-block text-left ${className}`} ref={menuRef}>
@@ -178,6 +187,14 @@ export default function ExportButton({
           >
             <FileText size={12} className="text-amber-400/80" />
             <span>Text Report (.txt)</span>
+          </button>
+
+          <button
+            onClick={handleExportPdf}
+            className="w-full text-left px-3 py-1.5 text-zinc-300 hover:bg-[#00f0ff]/10 hover:text-[#00f0ff] flex items-center gap-2 transition-colors cursor-pointer"
+          >
+            <FileDown size={12} className="text-rose-400/90" />
+            <span>PDF Report (.pdf)</span>
           </button>
 
           <div className="border-t border-white/5 my-1" />

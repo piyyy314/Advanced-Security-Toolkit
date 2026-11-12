@@ -1,4 +1,4 @@
-export type ActiveTool = 'operational-dashboard' | 'vuln-scanner' | 'penetration-framework' | 'network-analysis' | 'entropy' | 'ast' | 'ebpf' | 'pe' | 'signature' | 'crypto' | 'smt-verifier' | 'google-drive' | 'sandbox' | 'waf' | 'wireless' | 'console' | 'archive' | 'overviews' | 'ai-coprocessor' | 'yara';
+export type ActiveTool = 'operational-dashboard' | 'vuln-scanner' | 'penetration-framework' | 'network-analysis' | 'iphone-diagnostics' | 'entropy' | 'ast' | 'ebpf' | 'pe' | 'signature' | 'crypto' | 'smt-verifier' | 'google-drive' | 'sandbox' | 'waf' | 'wireless' | 'console' | 'archive' | 'overviews' | 'ai-coprocessor' | 'yara';
 
 export interface SysCallAlert {
   id: string;

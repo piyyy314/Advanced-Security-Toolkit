@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Key, 
@@ -80,6 +80,15 @@ export default function CryptoEngine({
   const [crackConsoleLog, setCrackConsoleLog] = useState<string[]>([]);
   const [crackProgress, setCrackProgress] = useState<number>(0);
   const [isCrackingSim, setIsCrackingSim] = useState<boolean>(false);
+  const crackTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (crackTimerRef.current) {
+        clearInterval(crackTimerRef.current);
+      }
+    };
+  }, []);
 
   // Modular Exponentiation Math helper: (base^exp) % mod
   const powerMod = (base: number, exp: number, mod: number): number => {
@@ -319,8 +328,12 @@ export default function CryptoEngine({
     logs.push(`[*] Initializing 4-bit prefix check matrix sweeps...`);
     setCrackConsoleLog([...logs]);
 
+    if (crackTimerRef.current) {
+      clearInterval(crackTimerRef.current);
+    }
+
     let step = 0;
-    const interval = setInterval(() => {
+    crackTimerRef.current = setInterval(() => {
       step += 1;
       const progressPercent = Math.min(step * 10, 100);
       setCrackProgress(progressPercent);
@@ -339,7 +352,10 @@ export default function CryptoEngine({
         logs.push(`[>] Character diversity pool space size: ${keyDiversity.poolSize} options - Total calculated keyspace entropy bits: ${keyDiversity.totalBits} bits`);
         setCrackConsoleLog([...logs]);
       } else if (step === 10) {
-        clearInterval(interval);
+        if (crackTimerRef.current) {
+          clearInterval(crackTimerRef.current);
+          crackTimerRef.current = null;
+        }
         setIsCrackingSim(false);
         
         const vulnerabilityText = keyGrade.level === 'critical' || keyGrade.level === 'warning'
@@ -663,7 +679,7 @@ export default function CryptoEngine({
                     style={{ width: `${Math.min((entropyValue / 8) * 100, 100)}%` }}
                   />
                 </div>
-                <p className="text-[9px] text-white/30 leading-normal leading-relaxed">
+                <p className="text-[9px] text-white/30 leading-relaxed">
                   Identifies character sequence uniqueness. A rating closer to 8.0 bits confirms ideal high-entropy symmetric safety keys.
                 </p>
               </div>

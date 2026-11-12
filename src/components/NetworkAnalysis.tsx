@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Network, Key, Shield, AlertTriangle, FileText, 
@@ -64,6 +64,22 @@ export default function NetworkAnalysis({ triggerToast }: NetworkAnalysisProps) 
   // 12. NSA Compliance / Hardening
   const [hardeningScore, setHardeningScore] = useState(82);
 
+  // Track active intervals for guaranteed unmount cleanup
+  const timersRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
+
+  useEffect(() => {
+    const activeTimers = timersRef.current;
+    return () => {
+      activeTimers.forEach((t) => clearInterval(t));
+      activeTimers.clear();
+    };
+  }, []);
+
+  const stopInterval = (t: ReturnType<typeof setInterval>) => {
+    clearInterval(t);
+    timersRef.current.delete(t);
+  };
+
   // Executing 3. Network Analysis Scan
   const handleNetworkScan = () => {
     setIsScanning(true);
@@ -78,12 +94,13 @@ export default function NetworkAnalysis({ triggerToast }: NetworkAnalysisProps) 
       } else if (step === 3) {
         setScanOutput(prev => [...prev, `[+] Port 8080/tcp (HTTP) - OPEN (Unauthenticated Satellite Dashboard)`]);
       } else if (step === 4) {
-        clearInterval(interval);
+        stopInterval(interval);
         setIsScanning(false);
         setScanOutput(prev => [...prev, `[✓] SCAN COMPLETE. SNMPv1 plain credentials pose critical threat vulnerability.`]);
         triggerToast('🔍 Network scan complete! Ground segment topology fully mapped.');
       }
     }, 800);
+    timersRef.current.add(interval);
   };
 
   // Executing 5. Password Cracking
@@ -98,12 +115,13 @@ export default function NetworkAnalysis({ triggerToast }: NetworkAnalysisProps) 
       } else if (step === 2) {
         setCrackOutput(prev => [...prev, `[>] Exhausting space permutations... matching offset failure.`]);
       } else if (step === 3) {
-        clearInterval(interval);
+        stopInterval(interval);
         setIsCracking(false);
         setCrackOutput(prev => [...prev, `[✓] KEY CRACKED: "Aegis_Orbit_Admin_2026!"`, `[*] Crack time: 2.4 seconds`]);
         triggerToast('🔑 Key recovered successfully!');
       }
     }, 1000);
+    timersRef.current.add(interval);
   };
 
   // Executing 6. Social Eng. Simulation
@@ -118,12 +136,13 @@ export default function NetworkAnalysis({ triggerToast }: NetworkAnalysisProps) 
       } else if (step === 2) {
         setCampaignOutput(prev => [...prev, `[>] Dispatching simulated target email list...`]);
       } else if (step === 3) {
-        clearInterval(interval);
+        stopInterval(interval);
         setIsSimulatingCampaign(false);
         setCampaignOutput(prev => [...prev, `[✓] CAMPAIGN FINALISED. Over 42% clickthrough simulated, proving lack of credential-entry guardrails.`]);
         triggerToast('🎣 Phishing simulation finished!');
       }
     }, 800);
+    timersRef.current.add(interval);
   };
 
   // Executing 7. Malware Sandbox
@@ -140,12 +159,13 @@ export default function NetworkAnalysis({ triggerToast }: NetworkAnalysisProps) 
       } else if (step === 3) {
         setSandboxOutput(prev => [...prev, `[⚠️] WARNING: Attempted to fetch remote payloads from unvetted HTTP endpoint`]);
       } else if (step === 4) {
-        clearInterval(interval);
+        stopInterval(interval);
         setIsSandboxRunning(false);
         setSandboxOutput(prev => [...prev, `[✓] SANDBOX EXECUTION HALTED. Threat index: 8.8/10 (Ransomware Backdoor)`]);
         triggerToast('☣️ Sandbox threat behavior analyzed!');
       }
     }, 900);
+    timersRef.current.add(interval);
   };
 
   // Executing 8. Incident Forensics
@@ -160,12 +180,13 @@ export default function NetworkAnalysis({ triggerToast }: NetworkAnalysisProps) 
       } else if (step === 2) {
         setForensicsLog(prev => [...prev, `[+] Match found: Root setuid execution on backdoor_payload aligned with SNR drop.`]);
       } else if (step === 3) {
-        clearInterval(interval);
+        stopInterval(interval);
         setIsAnalyzingForensics(false);
         setForensicsLog(prev => [...prev, `[✓] INCIDENT RESPONSE ANALYSIS COMPLETE. Root compromised through unauthenticated TCP console.`]);
         triggerToast('📋 Case forensics correlation complete!');
       }
     }, 1000);
+    timersRef.current.add(interval);
   };
 
   // Executing 9. Automated Reports
@@ -175,7 +196,7 @@ export default function NetworkAnalysis({ triggerToast }: NetworkAnalysisProps) 
     const interval = setInterval(() => {
       step++;
       if (step === 2) {
-        clearInterval(interval);
+        stopInterval(interval);
         setIsCompilingReport(false);
         const reportText = 
           `================================================================================\n` +
@@ -198,6 +219,7 @@ export default function NetworkAnalysis({ triggerToast }: NetworkAnalysisProps) 
         triggerToast('📋 Automated report successfully generated!');
       }
     }, 800);
+    timersRef.current.add(interval);
   };
 
   // Executing 10. RF Jamming Simulation
@@ -212,12 +234,13 @@ export default function NetworkAnalysis({ triggerToast }: NetworkAnalysisProps) 
       } else if (step === 2) {
         setJammingOutput(prev => [...prev, `[⚠️] Carrier SNR collapsing to < 6.2 dB (LOCK LOST)`]);
       } else if (step === 3) {
-        clearInterval(interval);
+        stopInterval(interval);
         setIsJamming(false);
         setJammingOutput(prev => [...prev, `[✓] RF Spectrum fully congested. Target satellite communication transponder completely disconnected.`]);
         triggerToast('📡 High-power Jamming active! Communication loop severed.');
       }
     }, 900);
+    timersRef.current.add(interval);
   };
 
   return (

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ShieldAlert, 
@@ -55,9 +55,10 @@ interface SmtVerificationResult {
 
 interface SmtConstantTimeVerifierProps {
   triggerToast?: (msg: string) => void;
+  importedCode?: { content: string; seq: number } | null;
 }
 
-export default function SmtConstantTimeVerifier({ triggerToast }: SmtConstantTimeVerifierProps) {
+export default function SmtConstantTimeVerifier({ triggerToast, importedCode }: SmtConstantTimeVerifierProps) {
   // Preset templates
   const presets = [
     {
@@ -66,7 +67,7 @@ export default function SmtConstantTimeVerifier({ triggerToast }: SmtConstantTim
       type: 'vulnerable',
       secretVars: 'secret_key, expected_mac',
       publicVars: 'len, user_input',
-      code: `int bad_memcmp(const unsigned char *secret_key, const unsigned char *user_input, size-[#00f0ff] len) {
+      code: `int bad_memcmp(const unsigned char *secret_key, const unsigned char *user_input, size_t len) {
   for (size_t i = 0; i < len; i++) {
     // VULNERABILITY: Secret-dependent branch decision!
     // Early return terminates execution on first mismatch, leaking key bytes via timing.
@@ -156,6 +157,22 @@ export default function SmtConstantTimeVerifier({ triggerToast }: SmtConstantTim
   const [analysisProgress, setAnalysisProgress] = useState<number>(0);
   const [verificationResult, setVerificationResult] = useState<SmtVerificationResult | null>(null);
   const [activeTab, setActiveTab] = useState<'proof' | 'smtlib2' | 'counterexample' | 'taint'>('proof');
+  const solverTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (solverTimerRef.current) {
+        clearInterval(solverTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (importedCode && importedCode.content.trim()) {
+      setSourceCode(importedCode.content);
+      setVerificationResult(null);
+    }
+  }, [importedCode]);
 
   // Handle Preset Select
   const handleSelectPreset = (id: string) => {
@@ -171,6 +188,9 @@ export default function SmtConstantTimeVerifier({ triggerToast }: SmtConstantTim
 
   // Perform Symbolic Execution & SMT Solver Analysis
   const runSmtFormalVerification = () => {
+    if (solverTimerRef.current) {
+      clearInterval(solverTimerRef.current);
+    }
     setIsAnalyzing(true);
     setAnalysisProgress(10);
     setVerificationResult(null);
@@ -179,12 +199,15 @@ export default function SmtConstantTimeVerifier({ triggerToast }: SmtConstantTim
     const publicVars = publicVarsStr.split(',').map(s => s.trim()).filter(Boolean);
 
     let progress = 10;
-    const interval = setInterval(() => {
+    solverTimerRef.current = setInterval(() => {
       progress += 20;
       setAnalysisProgress(Math.min(progress, 90));
 
       if (progress >= 100) {
-        clearInterval(interval);
+        if (solverTimerRef.current) {
+          clearInterval(solverTimerRef.current);
+          solverTimerRef.current = null;
+        }
         executeVerificationLogic(secretVars, publicVars);
       }
     }, 200);
@@ -727,18 +750,18 @@ export default function SmtConstantTimeVerifier({ triggerToast }: SmtConstantTim
                       <GitBranch size={14} /> SMT Solver Satisfiability Counterexample Trace
                     </h4>
                     <p className="text-white/70 text-[11px]">
-                      The SMT solver identified two distinct secret key values ($S_1 \neq S_2$) that produce unequal execution path timings despite identical public parameters.
+                      The SMT solver identified two distinct secret key values (S₁ ≠ S₂) that produce unequal execution path timings despite identical public parameters.
                     </p>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
                       <div className="p-3 bg-black/60 border border-white/5 rounded space-y-1">
-                        <span className="text-[10px] text-rose-400 uppercase font-bold block">Execution Instance 1 ($S_1$)</span>
+                        <span className="text-[10px] text-rose-400 uppercase font-bold block">Execution Instance 1 (S₁)</span>
                         <div className="text-zinc-200 text-[11px] truncate">Secret Input: {verificationResult.counterExample.secretInput1}</div>
                         <div className="text-emerald-400 text-[11px]">Duration: {verificationResult.counterExample.path1DurationCycles} CPU Cycles</div>
                       </div>
 
                       <div className="p-3 bg-black/60 border border-white/5 rounded space-y-1">
-                        <span className="text-[10px] text-[#00f0ff] uppercase font-bold block">Execution Instance 2 ($S_2$)</span>
+                        <span className="text-[10px] text-[#00f0ff] uppercase font-bold block">Execution Instance 2 (S₂)</span>
                         <div className="text-zinc-200 text-[11px] truncate">Secret Input: {verificationResult.counterExample.secretInput2}</div>
                         <div className="text-rose-400 text-[11px]">Duration: {verificationResult.counterExample.path2DurationCycles} CPU Cycles</div>
                       </div>
@@ -747,7 +770,7 @@ export default function SmtConstantTimeVerifier({ triggerToast }: SmtConstantTim
                     <div className="p-3 bg-rose-950/20 border border-rose-900/40 rounded text-rose-200 text-[11px] space-y-1">
                       <span className="font-bold block uppercase text-[10px]">Timing Delta Leakage:</span>
                       <div>
-                        $\Delta T = |{verificationResult.counterExample.path1DurationCycles} - {verificationResult.counterExample.path2DurationCycles}| = {Math.abs(verificationResult.counterExample.path1DurationCycles - verificationResult.counterExample.path2DurationCycles)}$ CPU Cycles
+                        ΔT = |{verificationResult.counterExample.path1DurationCycles} - {verificationResult.counterExample.path2DurationCycles}| = {Math.abs(verificationResult.counterExample.path1DurationCycles - verificationResult.counterExample.path2DurationCycles)} CPU Cycles
                       </div>
                       <p className="text-white/60 text-[10px] pt-1">
                         {verificationResult.counterExample.exploitScenario}

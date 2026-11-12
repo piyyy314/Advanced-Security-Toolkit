@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { BarChart3, AlertCircle, FileDigit, HelpCircle } from 'lucide-react';
 
 interface EntropyCalculatorProps {
   onAnalyzeFinished: (bytes: Uint8Array, entropyResults: { offset: number; value: number }[], globalEntropy: number) => void;
+  importedData?: { content: string; seq: number } | null;
 }
 
-export default function EntropyCalculator({ onAnalyzeFinished }: EntropyCalculatorProps) {
+export default function EntropyCalculator({ onAnalyzeFinished, importedData }: EntropyCalculatorProps) {
   const [inputText, setInputText] = useState(
     "// Type or paste any binary hex stream, assembly instructions, or plain text to run absolute Shannon entropy analysis on segments.\n" +
     "const key = '0x8f3c7e1a902b4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e'; // High randomness hex block\n" +
@@ -18,6 +19,18 @@ export default function EntropyCalculator({ onAnalyzeFinished }: EntropyCalculat
   const [windowSize, setWindowSize] = useState<number>(32);
   const [analyzed, setAnalyzed] = useState(false);
   const [errorStr, setErrorStr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (importedData && importedData.content.trim()) {
+      const trimmed = importedData.content.trim();
+      const cleaned = trimmed.replace(/\s+/g, '');
+      const looksHex = cleaned.length >= 2 && /^[0-9a-fA-F]+$/.test(cleaned) && cleaned.length % 2 === 0;
+      setInputMode(looksHex ? 'hex' : 'text');
+      setInputText(importedData.content);
+      setAnalyzed(false);
+      setErrorStr(null);
+    }
+  }, [importedData]);
 
   const calculateShannonEntropy = (data: Uint8Array): number => {
     if (data.length === 0) return 0;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, FormEvent } from 'react';
+import React, { useState, useEffect, useRef, FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ShieldCheck, Cpu, Play, Square, Eye, Plus, Ban, Trash2, Edit2, CheckCircle, Download } from 'lucide-react';
 import { EbpfRule, SysCallAlert } from '../types';
@@ -60,6 +60,10 @@ export default function EbpfTelemetry({
     { id: '3', name: 'Trace setuid escalations', type: 'syscall', pattern: 'setuid', action: 'allow', active: true },
     { id: '4', name: 'Audit /etc/ shadow access', type: 'path', pattern: '/etc/shadow', action: 'block', active: true }
   ]);
+  const rulesRef = useRef<EbpfRule[]>(rules);
+  useEffect(() => {
+    rulesRef.current = rules;
+  }, [rules]);
 
   // Form states to create new custom systems rule
   const [formName, setFormName] = useState('');
@@ -122,7 +126,7 @@ export default function EbpfTelemetry({
 
       // Check user customized filters rules
       let verdict: 'allow' | 'block' = 'allow';
-      const activeRules = rules.filter(r => r.active);
+      const activeRules = rulesRef.current.filter(r => r.active);
       const matchesRule = activeRules.find(r => {
         if (r.type === 'comm' && chosen.comm.toLowerCase().includes(r.pattern.toLowerCase())) {
           return true;
@@ -160,7 +164,7 @@ export default function EbpfTelemetry({
     }, intervalTime);
 
     return () => clearInterval(generatorTimer);
-  }, [isRunning, rules, threatLevel]);
+  }, [isRunning, threatLevel]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -189,7 +193,7 @@ export default function EbpfTelemetry({
                 : 'bg-emerald-950/20 hover:bg-emerald-900/40 text-emerald-400 border border-emerald-900/40'
               }`}
             >
-              <Play size={11} /> START DEAMON
+              <Play size={11} /> START DAEMON
             </button>
             <button
               onClick={() => setIsRunning(false)}
@@ -200,7 +204,7 @@ export default function EbpfTelemetry({
                 : 'bg-rose-950/20 hover:bg-rose-900/40 text-rose-400 border border-rose-900/40'
               }`}
             >
-              <Square size={11} /> STOP DEAMON
+              <Square size={11} /> STOP DAEMON
             </button>
           </div>
         </div>
@@ -298,7 +302,7 @@ export default function EbpfTelemetry({
                 className={`flex items-center justify-between p-3 rounded border transition-all ${
                   rule.active 
                   ? 'bg-black/30 border-white/5 text-zinc-300' 
-                  : 'bg-black/10 border-white/5/40 text-white/30'
+                  : 'bg-black/10 border-white/[0.03] text-white/30'
                 }`}
               >
                 <div className="flex items-baseline gap-2 font-mono">
@@ -411,13 +415,13 @@ export default function EbpfTelemetry({
                       : 'bg-black/40 border-white/5 text-white/60 hover:border-white/20'
                   }`}
                 >
-                  <div className="absolute right-2.5 bottom-2 opacity-0 group-hover:opacity-150 text-[8px] text-[#00f0ff] font-bold tracking-wider uppercase font-mono transition-all">
+                  <div className="absolute right-2.5 bottom-2 opacity-0 group-hover:opacity-100 text-[8px] text-[#00f0ff] font-bold tracking-wider uppercase font-mono transition-all">
                     DEEP DIVE →
                   </div>
                   <div className="flex items-center justify-between font-bold text-[10px] mb-1">
                     <span className="flex items-center gap-1.5">
                       {al.status === 'intercepted' ? (
-                        <span className="bg-rose-905/20 text-rose-300 border border-rose-900/30 px-1.5 py-0.5 rounded text-[8px] tracking-wider uppercase font-black">INTERCEPTED</span>
+                        <span className="bg-rose-950/20 text-rose-300 border border-rose-900/30 px-1.5 py-0.5 rounded text-[8px] tracking-wider uppercase font-black">INTERCEPTED</span>
                       ) : (
                         <span className="bg-emerald-950/20 text-emerald-300 border border-emerald-900/30 px-1.5 py-0.5 rounded text-[8px] tracking-wider uppercase font-black">ALLOWED</span>
                       )}

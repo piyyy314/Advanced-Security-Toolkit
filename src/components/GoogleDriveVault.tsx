@@ -6,7 +6,7 @@ import {
   googleSignIn, 
   logout, 
   getAccessToken,
-  GOOGLE_DRIVE_SCOPES 
+  isDriveConfigured
 } from '../services/googleDriveAuth';
 import { 
   listGoogleDriveFiles, 
@@ -64,6 +64,7 @@ export default function GoogleDriveVault({ triggerToast, onLoadIntoTool }: Googl
   const [hasToken, setHasToken] = useState<boolean>(false);
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
   const [authChecked, setAuthChecked] = useState<boolean>(false);
+  const driveConfigured = isDriveConfigured();
 
   // Drive Navigation & Files
   const [files, setFiles] = useState<DriveFileItem[]>([]);
@@ -166,6 +167,10 @@ export default function GoogleDriveVault({ triggerToast, onLoadIntoTool }: Googl
 
   // Sign In Handler
   const handleLogin = async () => {
+    if (!driveConfigured) {
+      if (triggerToast) triggerToast('Google Drive OAuth config missing: firebase-applet-config.json is not provisioned.');
+      return;
+    }
     setIsLoggingIn(true);
     try {
       const result = await googleSignIn();
@@ -330,8 +335,14 @@ export default function GoogleDriveVault({ triggerToast, onLoadIntoTool }: Googl
             <h1 className="text-sm font-serif font-light tracking-[0.2em] text-zinc-100 uppercase">
               Google Drive Security Vault & Cloud Telemetry
             </h1>
-            <span className="text-[9px] font-mono bg-[#00f0ff]/10 border border-[#00f0ff]/30 text-[#00f0ff] px-2 py-0.5 rounded font-bold uppercase">
-              OAuth 2.0 Connected
+            <span className={`text-[9px] font-mono px-2 py-0.5 rounded font-bold uppercase border ${
+              !driveConfigured
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                : hasToken
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                  : 'bg-[#00f0ff]/10 border-[#00f0ff]/30 text-[#00f0ff]'
+            }`}>
+              {!driveConfigured ? 'Config Missing' : hasToken ? 'OAuth 2.0 Connected' : 'OAuth 2.0 Ready'}
             </span>
           </div>
           <p className="text-[11px] font-mono text-white/40 mt-1 leading-relaxed">
@@ -398,19 +409,28 @@ export default function GoogleDriveVault({ triggerToast, onLoadIntoTool }: Googl
           </div>
           <div className="max-w-md mx-auto space-y-1.5">
             <h3 className="text-sm font-serif font-bold text-zinc-100 uppercase tracking-widest">
-              Connect Your Google Drive Workspace
+              {driveConfigured ? 'Connect Your Google Drive Workspace' : 'Google Drive OAuth Configuration Required'}
             </h3>
             <p className="text-xs text-white/50 leading-relaxed">
-              Authenticate to securely list files, import forensic datasets into active analysis sandboxes, and export audited security telemetry directly to your cloud storage.
+              {driveConfigured
+                ? 'Authenticate to securely list files, import forensic datasets into active analysis sandboxes, and export audited security telemetry directly to your cloud storage.'
+                : 'Firebase & Google Drive client configuration (firebase-applet-config.json) is not present in this workspace. Provision Firebase/Google OAuth credentials or restore firebase-applet-config.json to enable cloud Drive sync.'}
             </p>
           </div>
-          <button
-            onClick={handleLogin}
-            disabled={isLoggingIn}
-            className="px-6 py-2.5 bg-[#00f0ff]/15 hover:bg-[#00f0ff] hover:text-black text-[#00f0ff] border border-[#00f0ff]/40 text-xs uppercase font-mono tracking-widest rounded cursor-pointer transition-all font-bold shadow-[0_0_15px_rgba(0,240,255,0.2)] disabled:opacity-50"
-          >
-            {isLoggingIn ? 'Authorizing Drive Session...' : 'Authorize Google Drive Access →'}
-          </button>
+          {driveConfigured ? (
+            <button
+              onClick={handleLogin}
+              disabled={isLoggingIn || !authChecked}
+              className="px-6 py-2.5 bg-[#00f0ff]/15 hover:bg-[#00f0ff] hover:text-black text-[#00f0ff] border border-[#00f0ff]/40 text-xs uppercase font-mono tracking-widest rounded cursor-pointer transition-all font-bold shadow-[0_0_15px_rgba(0,240,255,0.2)] disabled:opacity-50"
+            >
+              {isLoggingIn ? 'Authorizing Drive Session...' : 'Authorize Google Drive Access →'}
+            </button>
+          ) : (
+            <div className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500/10 border border-amber-500/30 rounded text-amber-300 text-[11px]">
+              <AlertTriangle size={14} />
+              <span>Missing <code className="text-amber-200 font-bold">firebase-applet-config.json</code></span>
+            </div>
+          )}
         </div>
       )}
 

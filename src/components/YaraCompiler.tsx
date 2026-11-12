@@ -21,6 +21,7 @@ import ExportButton from './ExportButton';
 
 interface YaraCompilerProps {
   triggerToast?: (msg: string) => void;
+  importedRule?: { content: string; seq: number } | null;
 }
 
 // Predefined high-fidelity templates
@@ -143,7 +144,7 @@ rule nested_portable_executable
   }
 ];
 
-export default function YaraCompiler({ triggerToast }: YaraCompilerProps) {
+export default function YaraCompiler({ triggerToast, importedRule }: YaraCompilerProps) {
   const [activeRule, setActiveRule] = useState<string>(TEMPLATES[0].code);
   const [testPayload, setTestPayload] = useState<string>(`<?php
   // Aegis Test File Sample
@@ -205,6 +206,15 @@ export default function YaraCompiler({ triggerToast }: YaraCompilerProps) {
     setIsCompiled(true);
     setCompileErrors(null);
   }, [activeRule]);
+
+  // Apply external imported YARA rules from Google Drive Vault
+  useEffect(() => {
+    if (importedRule && importedRule.content.trim()) {
+      setActiveRule(importedRule.content);
+      setActiveTab('editor');
+      setScanResult(null);
+    }
+  }, [importedRule]);
 
   // Load a template
   const handleLoadTemplate = (code: string) => {
@@ -268,9 +278,18 @@ void stage_remote_inject() {
         body: JSON.stringify({ description: aiPrompt })
       });
 
-      const data = await response.json();
-      if (data.success && data.text) {
-        setActiveRule(data.text);
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        if (triggerToast) triggerToast(`YARA synthesis error: ${data?.error || `HTTP ${response.status}`}`);
+        return;
+      }
+
+      if (data?.success && data?.text) {
+        const cleanedRule = String(data.text)
+          .replace(/^```(?:yara|yar)?\s*\n?/i, '')
+          .replace(/\n?```\s*$/i, '')
+          .trim();
+        setActiveRule(cleanedRule);
         setAiPrompt('');
         if (triggerToast) {
           triggerToast(
@@ -280,7 +299,7 @@ void stage_remote_inject() {
           );
         }
       } else {
-        if (triggerToast) triggerToast('Error compiling secure prompt rule.');
+        if (triggerToast) triggerToast(data?.error || 'Error compiling secure prompt rule.');
       }
     } catch (e: any) {
       if (triggerToast) triggerToast(`Pipeline connection failed: ${e.message}`);
@@ -619,7 +638,7 @@ void stage_remote_inject() {
                 <span className="text-[#00f0ff]/80 uppercase tracking-widest font-serif italic flex items-center gap-1.5">
                   <Sparkles size={11} /> AI Rule Synthesizer
                 </span>
-                <span className="text-white/20">Gemini-3.5 Secure Draftsman</span>
+                <span className="text-white/20">Gemini 4 Hydrogen Draftsman</span>
               </div>
 
               <div className="flex gap-2">

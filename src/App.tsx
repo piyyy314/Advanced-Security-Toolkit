@@ -24,6 +24,10 @@ import OperationalDashboard from './components/OperationalDashboard';
 import VulnerabilityScanner from './components/VulnerabilityScanner';
 import PenetrationFramework from './components/PenetrationFramework';
 import NetworkAnalysis from './components/NetworkAnalysis';
+import WafRuleEngine from './components/WafRuleEngine';
+import WirelessSpectrumAuditor from './components/WirelessSpectrumAuditor';
+import MalwareDetonationSandbox from './components/MalwareDetonationSandbox';
+import IphoneDiagnostics from './components/IphoneDiagnostics';
 import { 
   BarChart3, 
   TrendingUp,
@@ -49,8 +53,14 @@ import {
   Network,
   Scale,
   HardDrive,
-  Save
+  Save,
+  FileText,
+  Box,
+  Wifi,
+  ShieldCheck,
+  Smartphone
 } from 'lucide-react';
+import { exportForensicsPdf, ForensicReportPayload } from './utils/exportUtils';
 
 const FORENSIC_AUDIT_STORAGE_KEY = 'aegis_forensic_audit_state';
 
@@ -107,12 +117,17 @@ export default function App() {
   const [dhDerivedKey, setDhDerivedKey] = useState<string>('');
   const [entropyBytesLength, setEntropyBytesLength] = useState<number>(0);
   const [entropyGlobalScore, setEntropyGlobalScore] = useState<number>(0);
-  const [exportFormat, setExportFormat] = useState<'json' | 'csv'>('json');
+  const [exportFormat, setExportFormat] = useState<'json' | 'csv' | 'pdf'>('json');
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewContent, setPreviewContent] = useState<string>('');
   const [previewFilename, setPreviewFilename] = useState<string>('');
+  const [pendingPdfPayload, setPendingPdfPayload] = useState<ForensicReportPayload | null>(null);
+  const [importedYaraRule, setImportedYaraRule] = useState<{ content: string; seq: number } | null>(null);
+  const [importedSmtCode, setImportedSmtCode] = useState<{ content: string; seq: number } | null>(null);
+  const [importedEntropyData, setImportedEntropyData] = useState<{ content: string; seq: number } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Forensic Audit Auto-Save states (persists every 60s to LocalStorage)
   const [autoSaveStatus, setAutoSaveStatus] = useState<'saved' | 'saving' | 'idle' | 'error'>('saved');
@@ -172,14 +187,26 @@ export default function App() {
     entropyGlobalScore
   ]);
 
-  const triggerToast = (msg: string) => {
+  const triggerToast = useCallback((msg: string) => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
     setToastMessage(msg);
     setShowToast(true);
     // Auto-dismiss after 4 seconds
-    setTimeout(() => {
+    toastTimerRef.current = setTimeout(() => {
       setShowToast(false);
+      toastTimerRef.current = null;
     }, 4000);
-  };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   // Perform forensic state serialization & save to LocalStorage
   const handleSaveAuditState = useCallback((isManual = false) => {
@@ -376,68 +403,138 @@ export default function App() {
 
     if (modified) {
       localStorage.setItem('aegis_threat_archive', JSON.stringify(archiveList));
+      window.dispatchEvent(new Event('aegis-archive-updated'));
     }
   }, [ebpfAlerts, astFindings]);
 
-  const handleExportForensics = () => {
-    if (exportFormat === 'json') {
-      const payload = {
-        meta: {
-          suite: "Aegis Unified Security Suite",
-          version: "v2.5.0-Enterprise",
-          exported_by: "baalbek.313@gmail.com",
-          compiled_timestamp_utc: "2026-06-07T11:01:47Z",
-          system_time: new Date().toISOString(),
-          threat_posture_configured: threatLevel.toUpperCase(),
-          uncompromising_defense_active: threatLevel === 'high'
-        },
-        current_tool_viewing: activeTool,
-        real_time_statistics: {
-          active_mitigations_count: alertCount,
-          shannon_entropy_bytes_scanned: entropyBytesLength,
-          shannon_entropy_peak_score: entropyGlobalScore,
-          active_binary_selection: selectedPeKey,
-          diffie_hellman_handshake_prime: dhPrimeG,
-          diffie_hellman_handshake_generator: dhBaseP,
-          derived_ephemeral_key: dhDerivedKey || "NO_ACTIVE_NEGOTIATION"
-        },
-        ast_static_scan: {
-          checked_source_module_length: astSourceCode ? astSourceCode.length : 0,
-          ast_heuristics_vulnerability_matches: astFindings.map(f => ({
-            line: f.line,
-            vulnerability_type: f.type,
-            description_remediation: f.desc,
-            offending_signature: f.codeSnippet
-          }))
-        },
-        signature_matching_ledger: {
-          raw_hex_input_length_bytes: signatureHex ? (signatureHex.replace(/[^a-f]/gi, '').length / 2) : 0,
-          untrusted_hex_dump: signatureHex || "",
-          malicious_signature_detections: signatureAlerts.map(a => ({
-            buffer_offset: a.offset,
-            pattern_signature_catalog: a.patternName,
-            matched_bytes_sequence: a.matchedBytes
-          }))
-        },
-        ebpf_kernel_execution_logs: ebpfAlerts.map(al => ({
-          event_id: al.id,
-          timestamp_offset: al.timestamp,
-          process_id: al.pid,
-          parent_process_id: al.ppid,
-          executable_name: al.comm,
-          invoked_system_call: al.syscall,
-          syscall_arguments: al.args,
-          governing_sandbox_action: al.status,
-          incident_severity_classification: al.severity
-        }))
-      };
+  const buildForensicPayload = (): ForensicReportPayload => {
+    const statusLabel =
+      threatLevel === 'high'
+        ? 'MAXIMUM SHIELD ACTIVE'
+        : threatLevel === 'medium'
+          ? 'ELEVATED AUDITING'
+          : 'PASSIVE MONITORING';
 
+    return {
+      meta: {
+        suite: "Aegis Unified Security Suite",
+        version: "v2.5.0-Enterprise",
+        exported_by: "baalbek.313@gmail.com",
+        compiled_timestamp_utc: new Date().toISOString(),
+        system_time: new Date().toISOString(),
+        threat_posture_configured: threatLevel.toUpperCase(),
+        uncompromising_defense_active: threatLevel === 'high',
+        system_status_label: statusLabel,
+        auto_save_status:
+          autoSaveStatus === 'error'
+            ? 'LocalStorage Error'
+            : `LocalStorage Active (Last synced ${lastSavedTime ? lastSavedTime.toTimeString().substring(0, 8) : 'pending'})`
+      },
+      current_tool_viewing: activeTool,
+      real_time_statistics: {
+        active_mitigations_count: alertCount,
+        shannon_entropy_bytes_scanned: entropyBytesLength,
+        shannon_entropy_peak_score: entropyGlobalScore,
+        active_binary_selection: selectedPeKey,
+        diffie_hellman_handshake_prime: dhPrimeG,
+        diffie_hellman_handshake_generator: dhBaseP,
+        derived_ephemeral_key: dhDerivedKey || "NO_ACTIVE_NEGOTIATION"
+      },
+      ast_static_scan: {
+        checked_source_module_length: astSourceCode ? astSourceCode.length : 0,
+        ast_heuristics_vulnerability_matches: astFindings.map(f => ({
+          line: f.line,
+          vulnerability_type: f.type,
+          description_remediation: f.desc,
+          offending_signature: f.codeSnippet
+        }))
+      },
+      signature_matching_ledger: {
+        raw_hex_input_length_bytes: signatureHex ? (signatureHex.replace(/[^a-f]/gi, '').length / 2) : 0,
+        untrusted_hex_dump: signatureHex || "",
+        malicious_signature_detections: signatureAlerts.map(a => ({
+          buffer_offset: a.offset,
+          pattern_signature_catalog: a.patternName,
+          matched_bytes_sequence: a.matchedBytes
+        }))
+      },
+      ebpf_kernel_execution_logs: ebpfAlerts.map(al => ({
+        event_id: al.id,
+        timestamp_offset: al.timestamp,
+        process_id: al.pid,
+        parent_process_id: al.ppid,
+        executable_name: al.comm,
+        invoked_system_call: al.syscall,
+        syscall_arguments: al.args,
+        governing_sandbox_action: al.status,
+        incident_severity_classification: al.severity
+      }))
+    };
+  };
+
+  const handleExportForensics = () => {
+    const dateStamp = new Date().toISOString().substring(0, 10);
+
+    if (exportFormat === 'json') {
+      const payload = buildForensicPayload();
       const jsonString = JSON.stringify(payload, null, 2);
+      setPendingPdfPayload(null);
       setPreviewContent(jsonString);
-      setPreviewFilename(`aegis_forensics_dump_${new Date().toISOString().substring(0, 10)}.json`);
+      setPreviewFilename(`aegis_forensics_dump_${dateStamp}.json`);
+      setShowPreviewModal(true);
+    } else if (exportFormat === 'pdf') {
+      const payload = buildForensicPayload();
+      setPendingPdfPayload(payload);
+
+      const summaryOutline = [
+        `AEGIS UNIFIED SECURITY SUITE — FORMAL PDF REPORT BLUEPRINT`,
+        `====================================================================`,
+        ``,
+        `[PAGE 1 : COVER PAGE]`,
+        `  Title:           FORENSIC SECURITY AUDIT & TELEMETRY REPORT`,
+        `  Version:         ${payload.meta.version}`,
+        `  Timestamp (UTC): ${payload.meta.system_time}`,
+        `  System Status:   ${payload.meta.system_status_label} (${payload.meta.threat_posture_configured} POSTURE)`,
+        `  Defense Mode:    ${payload.meta.uncompromising_defense_active ? 'UNCOMPROMISING BLOCK ACTIVE' : 'STANDARD MONITORING'}`,
+        `  Operator:        ${payload.meta.exported_by}`,
+        `  Active Module:   ${payload.current_tool_viewing}`,
+        ``,
+        `[SECTION 01 & 02 : SUMMARY & REAL-TIME THREAT METRICS]`,
+        `  Active Mitigations:      ${payload.real_time_statistics.active_mitigations_count}`,
+        `  Entropy Bytes Scanned:   ${payload.real_time_statistics.shannon_entropy_bytes_scanned} bytes`,
+        `  Peak Shannon Entropy:    ${payload.real_time_statistics.shannon_entropy_peak_score} bits/byte`,
+        `  Selected PE Binary:      ${payload.real_time_statistics.active_binary_selection}`,
+        `  Diffie-Hellman Prime/G:  ${payload.real_time_statistics.diffie_hellman_handshake_prime} / ${payload.real_time_statistics.diffie_hellman_handshake_generator}`,
+        `  Derived Ephemeral Key:   ${payload.real_time_statistics.derived_ephemeral_key}`,
+        ``,
+        `[SECTION 03 : AST STATIC SECURITY FINDINGS (${payload.ast_static_scan.ast_heuristics_vulnerability_matches.length})]`,
+        ...(payload.ast_static_scan.ast_heuristics_vulnerability_matches.length > 0
+          ? payload.ast_static_scan.ast_heuristics_vulnerability_matches.map(
+              (f, i) => `  ${i + 1}. [Line ${f.line}] ${f.vulnerability_type} — ${f.description_remediation}`
+            )
+          : [`  (No static AST vulnerabilities detected in current buffer)`]),
+        ``,
+        `[SECTION 04 : MALWARE SIGNATURE MATCHING LEDGER (${payload.signature_matching_ledger.malicious_signature_detections.length})]`,
+        ...(payload.signature_matching_ledger.malicious_signature_detections.length > 0
+          ? payload.signature_matching_ledger.malicious_signature_detections.map(
+              (s, i) => `  ${i + 1}. [Offset ${s.buffer_offset}] ${s.pattern_signature_catalog} (${s.matched_bytes_sequence})`
+            )
+          : [`  (No malicious byte signatures matched)`]),
+        ``,
+        `[SECTION 05 : eBPF KERNEL EXECUTION TELEMETRY LOGS (${payload.ebpf_kernel_execution_logs.length})]`,
+        ...(payload.ebpf_kernel_execution_logs.length > 0
+          ? payload.ebpf_kernel_execution_logs.map(
+              (e, i) => `  ${i + 1}. [${e.incident_severity_classification.toUpperCase()}] ${e.executable_name} -> ${e.invoked_system_call}() (${e.governing_sandbox_action})`
+            )
+          : [`  (No kernel syscall events logged in current session)`])
+      ].join('\n');
+
+      setPreviewContent(summaryOutline);
+      setPreviewFilename(`aegis_forensics_report_${dateStamp}.pdf`);
       setShowPreviewModal(true);
     } else {
       // CSV Format Generating
+      setPendingPdfPayload(null);
       const escapeCsvValue = (val: any) => {
         if (val === undefined || val === null) return '""';
         const str = String(val).replace(/"/g, '""');
@@ -500,7 +597,7 @@ export default function App() {
       });
 
       setPreviewContent(csvContent);
-      setPreviewFilename(`aegis_forensics_dump_${new Date().toISOString().substring(0, 10)}.csv`);
+      setPreviewFilename(`aegis_forensics_dump_${dateStamp}.csv`);
       setShowPreviewModal(true);
     }
   };
@@ -512,6 +609,8 @@ export default function App() {
           <OperationalDashboard 
             setActiveTool={setActiveTool}
             triggerToast={triggerToast}
+            ebpfAlerts={ebpfAlerts}
+            astFindings={astFindings}
           />
         );
       case 'vuln-scanner':
@@ -539,6 +638,7 @@ export default function App() {
               setEntropyBytesLength(bytesLen);
               setEntropyGlobalScore(score);
             }} 
+            importedData={importedEntropyData}
             triggerToast={triggerToast}
           />
         );
@@ -589,6 +689,7 @@ export default function App() {
         return (
           <SmtConstantTimeVerifier 
             triggerToast={triggerToast}
+            importedCode={importedSmtCode}
           />
         );
       case 'signature':
@@ -624,6 +725,7 @@ export default function App() {
         return (
           <YaraCompiler 
             triggerToast={triggerToast}
+            importedRule={importedYaraRule}
           />
         );
       case 'google-drive':
@@ -631,18 +733,36 @@ export default function App() {
           <GoogleDriveVault 
             triggerToast={triggerToast}
             onLoadIntoTool={(tool, payload) => {
+              const stamped = { content: payload, seq: Date.now() };
               if (tool === 'ast') {
                 setAstSourceCode(payload);
                 setActiveTool('ast');
               } else if (tool === 'signature') {
                 setSignatureHex(payload);
                 setActiveTool('signature');
+              } else if (tool === 'yara') {
+                setImportedYaraRule(stamped);
+                setActiveTool('yara');
+              } else if (tool === 'smt-verifier') {
+                setImportedSmtCode(stamped);
+                setActiveTool('smt-verifier');
+              } else if (tool === 'entropy') {
+                setImportedEntropyData(stamped);
+                setActiveTool('entropy');
               } else {
                 setActiveTool(tool);
               }
             }}
           />
         );
+      case 'waf':
+        return <WafRuleEngine triggerToast={triggerToast} />;
+      case 'sandbox':
+        return <MalwareDetonationSandbox triggerToast={triggerToast} />;
+      case 'wireless':
+        return <WirelessSpectrumAuditor triggerToast={triggerToast} />;
+      case 'iphone-diagnostics':
+        return <IphoneDiagnostics triggerToast={triggerToast} />;
     }
   };
 
@@ -651,6 +771,10 @@ export default function App() {
     { id: 'vuln-scanner' as const, label: '1. Vulnerability Scanner', icon: Shield, desc: 'CISA KEV Satellite Active Auditor' },
     { id: 'penetration-framework' as const, label: '2. Penetration Framework', icon: Zap, desc: 'Custom Uplink Payload Injection' },
     { id: 'network-analysis' as const, label: '9-Element Tactical Suite', icon: Network, desc: 'Network, Pwd, Sandbox, Forensic, Jamming' },
+    { id: 'waf' as const, label: 'Adaptive WAF Firewall', icon: ShieldCheck, desc: 'OWASP CRS & payload inspection' },
+    { id: 'sandbox' as const, label: 'Detonation Sandbox', icon: Box, desc: 'Micro-VM behavioral trace & ATT&CK' },
+    { id: 'wireless' as const, label: 'Wireless & RF Auditor', icon: Wifi, desc: '802.11 rogue AP & spectrum scan' },
+    { id: 'iphone-diagnostics' as const, label: 'iPhone Deep Diagnostics', icon: Smartphone, desc: 'USB, Bluetooth & internet tether audit' },
     { id: 'console' as const, label: 'Console Stream', icon: Terminal, desc: 'Live kernel & hypervisor logs' },
     { id: 'overviews' as const, label: 'Threat Overviews', icon: TrendingUp, desc: 'Aggregated analytics charts' },
     { id: 'ai-coprocessor' as const, label: 'AI Threat Coprocessor', icon: Sparkles, desc: 'Heuristics & static forensics' },
@@ -708,7 +832,7 @@ export default function App() {
               Intelligence Modules
             </h2>
             
-            <nav className="space-y-2">
+            <nav className="space-y-1.5 max-h-[430px] overflow-y-auto pr-1">
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const isSelected = activeTool === item.id;
@@ -717,18 +841,18 @@ export default function App() {
                     key={item.id}
                     id={`nav-btn-${item.id}`}
                     onClick={() => setActiveTool(item.id)}
-                    className={`w-full text-left p-3.5 rounded border transition-all text-xs flex items-start gap-3.5 cursor-pointer ${
+                    className={`w-full text-left px-3 py-2.5 rounded border transition-all text-xs flex items-start gap-3 cursor-pointer ${
                       isSelected
-                        ? 'bg-cyan-500/10 text-white border-[#00f0ff]/40 shadow-[0_0_15px_rgba(0,240,255,0.08)] border-l-2 border-l-[#00f0ff]'
+                        ? 'bg-cyan-500/10 text-white border-[#00f0ff]/45 shadow-[0_0_15px_rgba(0,240,255,0.08)]'
                         : 'bg-transparent text-white/40 border-transparent hover:border-white/5 hover:bg-white/[0.01] hover:text-white/80'
                     }`}
                   >
-                    <Icon size={15} className={`shrink-0 mt-0.5 ${isSelected ? 'text-[#00f0ff]' : 'text-white/30'}`} />
-                    <div className="flex flex-col">
-                      <span className={`tracking-wider ${isSelected ? 'font-light text-white font-serif' : 'font-mono text-white/50'}`}>
+                    <Icon size={14} className={`shrink-0 mt-0.5 ${isSelected ? 'text-[#00f0ff]' : 'text-white/30'}`} />
+                    <div className="flex flex-col min-w-0">
+                      <span className={`tracking-wider truncate ${isSelected ? 'font-light text-white font-serif' : 'font-mono text-white/50'}`}>
                         {item.label}
                       </span>
-                      <span className="text-[10px] text-white/30 font-mono tracking-wide mt-0.5 leading-tight lowercase">
+                      <span className="text-[10px] text-white/30 font-mono tracking-wide mt-0.5 leading-tight lowercase truncate">
                         {item.desc}
                       </span>
                     </div>
@@ -812,30 +936,44 @@ export default function App() {
             </div>
 
             {/* Toggle format preset buttons */}
-            <div className="flex items-center justify-between border-t border-white/5 pt-3.5">
-              <span className="text-[10px] text-white/30 font-mono uppercase tracking-wider">File Format:</span>
+            <div className="flex items-center justify-between border-t border-white/5 pt-3.5 gap-2">
+              <span className="text-[10px] text-white/30 font-mono uppercase tracking-wider shrink-0">Format:</span>
               <div className="flex bg-[#07070A] border border-white/5 rounded p-0.5 text-[9px] gap-0.5">
                 <button
                   type="button"
+                  id="fmt-btn-json"
                   onClick={() => setExportFormat('json')}
-                  className={`px-2.5 py-1 rounded transition-all font-mono font-bold cursor-pointer ${
+                  className={`px-2 py-1 rounded transition-all font-mono font-bold cursor-pointer ${
                     exportFormat === 'json'
                       ? 'bg-[#00f0ff]/15 text-[#00f0ff] border border-[#00f0ff]/20 font-bold text-[9px]'
                       : 'text-zinc-500 hover:text-zinc-300 bg-transparent border border-transparent'
                   }`}
                 >
-                  JSON List
+                  JSON
                 </button>
                 <button
                   type="button"
+                  id="fmt-btn-csv"
                   onClick={() => setExportFormat('csv')}
-                  className={`px-2.5 py-1 rounded transition-all font-mono font-bold cursor-pointer ${
+                  className={`px-2 py-1 rounded transition-all font-mono font-bold cursor-pointer ${
                     exportFormat === 'csv'
                       ? 'bg-[#00f0ff]/15 text-[#00f0ff] border border-[#00f0ff]/20 font-bold text-[9px]'
                       : 'text-zinc-500 hover:text-zinc-300 bg-transparent border border-transparent'
                   }`}
                 >
-                  CSV Matrix
+                  CSV
+                </button>
+                <button
+                  type="button"
+                  id="fmt-btn-pdf"
+                  onClick={() => setExportFormat('pdf')}
+                  className={`px-2 py-1 rounded transition-all font-mono font-bold cursor-pointer ${
+                    exportFormat === 'pdf'
+                      ? 'bg-[#00f0ff]/15 text-[#00f0ff] border border-[#00f0ff]/20 font-bold text-[9px]'
+                      : 'text-zinc-500 hover:text-zinc-300 bg-transparent border border-transparent'
+                  }`}
+                >
+                  PDF
                 </button>
               </div>
             </div>
@@ -885,13 +1023,21 @@ export default function App() {
               {/* Header */}
               <div className="flex items-center justify-between px-5 py-4 border-b border-white/5 bg-[#0A0A0D]">
                 <div className="flex items-center gap-2">
-                  <FileJson className="text-[#00f0ff]" size={14} />
+                  {previewFilename.endsWith('.pdf') ? (
+                    <FileText className="text-[#00f0ff]" size={14} />
+                  ) : (
+                    <FileJson className="text-[#00f0ff]" size={14} />
+                  )}
                   <div>
                     <h3 className="font-serif italic font-bold text-xs tracking-wider uppercase text-[#00f0ff]">
-                      Forensics Report Export Preview
+                      {previewFilename.endsWith('.pdf')
+                        ? 'Forensics PDF Report Blueprint Preview'
+                        : 'Forensics Report Export Preview'}
                     </h3>
                     <p className="text-[9px] text-white/30 font-mono mt-0.5">
-                      Verify compiled security telemetry dataset before local system download
+                      {previewFilename.endsWith('.pdf')
+                        ? 'Verify cover page status, metrics, and findings before compiling multi-page A4 PDF'
+                        : 'Verify compiled security telemetry dataset before local system download'}
                     </p>
                   </div>
                 </div>
@@ -908,15 +1054,28 @@ export default function App() {
                 <span className="w-1.5 h-1.5 rounded-full bg-[#00f0ff] animate-pulse" />
                 <span>Filename target: <strong className="text-zinc-300 font-normal">{previewFilename}</strong></span>
                 <span className="text-white/20 hidden sm:inline">|</span>
-                <span>Type: <strong className="text-zinc-300 uppercase font-normal">{previewFilename.endsWith('.json') ? 'JSON Object' : 'CSV Spreadsheet'}</strong></span>
-                <span className="text-white/20 hidden sm:inline">|</span>
-                <span>Size: <strong className="text-zinc-300 font-normal">{(previewContent.length / 1024).toFixed(2)} KB</strong></span>
+                <span>
+                  Type:{' '}
+                  <strong className="text-zinc-300 uppercase font-normal">
+                    {previewFilename.endsWith('.pdf')
+                      ? 'Formal PDF Report (A4)'
+                      : previewFilename.endsWith('.json')
+                        ? 'JSON Object'
+                        : 'CSV Spreadsheet'}
+                  </strong>
+                </span>
+                {!previewFilename.endsWith('.pdf') && (
+                  <>
+                    <span className="text-white/20 hidden sm:inline">|</span>
+                    <span>Size: <strong className="text-zinc-300 font-normal">{(previewContent.length / 1024).toFixed(2)} KB</strong></span>
+                  </>
+                )}
               </div>
 
               {/* Preview Body */}
               <div className="p-5 flex-1 overflow-hidden flex flex-col gap-2">
                 <div className="text-[10px] text-white/40 mb-1 flex justify-between items-center">
-                  <span>UNIFIED DATA STREAM:</span>
+                  <span>{previewFilename.endsWith('.pdf') ? 'PDF DOCUMENT OUTLINE:' : 'UNIFIED DATA STREAM:'}</span>
                   <span className="text-[9px] text-zinc-500">Scroll to inspect entire log</span>
                 </div>
                 <div className="flex-1 bg-black/60 border border-white/5 rounded p-4 overflow-auto font-mono text-[10.5px] leading-relaxed text-zinc-300 max-h-[45vh] select-all">
@@ -929,13 +1088,28 @@ export default function App() {
               {/* Actions Footer */}
               <div className="px-5 py-4 border-t border-white/5 bg-[#0A0A0D] flex items-center justify-end gap-3">
                 <button
-                  onClick={() => setShowPreviewModal(false)}
+                  onClick={() => {
+                    setShowPreviewModal(false);
+                    setPendingPdfPayload(null);
+                  }}
                   className="px-4 py-1.5 border border-white/10 hover:border-white/20 hover:bg-white/5 rounded text-zinc-400 hover:text-zinc-200 transition-all cursor-pointer font-mono text-[10px] uppercase font-bold"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => {
+                    if (previewFilename.endsWith('.pdf') && pendingPdfPayload) {
+                      try {
+                        exportForensicsPdf(pendingPdfPayload, previewFilename);
+                        setShowPreviewModal(false);
+                        setPendingPdfPayload(null);
+                        triggerToast('Formal multi-page Forensic Audit PDF generated & downloaded.');
+                      } catch (err) {
+                        console.error('Failed to generate Forensic Audit PDF:', err);
+                        triggerToast('Failed to generate PDF report. Please check console details.');
+                      }
+                      return;
+                    }
                     const type = previewFilename.endsWith('.json') ? 'application/json;charset=utf-8;' : 'text/csv;charset=utf-8;';
                     const blob = new Blob([previewContent], { type });
                     const url = URL.createObjectURL(blob);
@@ -951,7 +1125,7 @@ export default function App() {
                   }}
                   className="px-4 py-1.5 bg-[#00f0ff] hover:bg-[#00d0e0] text-black font-mono text-[10px] font-bold uppercase rounded flex items-center gap-1.5 transition-all cursor-pointer shadow-[0_0_12px_rgba(0,240,255,0.2)]"
                 >
-                  <Download size={11} /> Confirm & Download
+                  <Download size={11} /> {previewFilename.endsWith('.pdf') ? 'Generate & Download PDF' : 'Confirm & Download'}
                 </button>
               </div>
             </motion.div>
@@ -966,7 +1140,7 @@ export default function App() {
             initial={{ opacity: 0, y: -24, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95, y: -10 }}
-            className="fixed top-6 right-6 z-50 bg-[#0E0E12] border border-[#00f0ff]/50 text-zinc-100 px-4 py-3 rounded-lg shadow-[0_12px_40px_rgba(0,0,0,0.85)] flex items-center gap-3 font-mono text-[11px] select-none max-w-sm border-l-4 border-l-[#00f0ff]"
+            className="fixed top-6 right-6 z-50 bg-[#0E0E12] border border-[#00f0ff]/50 text-zinc-100 px-4 py-3 rounded-lg shadow-[0_12px_40px_rgba(0,0,0,0.85)] flex items-center gap-3 font-mono text-[11px] select-none max-w-sm"
           >
             <div className="p-1.5 bg-[#00f0ff]/10 rounded text-[#00f0ff]">
               <CheckCircle size={14} />

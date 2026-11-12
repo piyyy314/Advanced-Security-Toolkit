@@ -265,7 +265,7 @@ export default function ThreatDetailModal({ isOpen, onClose, ebpfAlert, astFindi
                       <strong className="text-[#00f0ff] block mt-0.5">{ebpfAlert.ppid}</strong>
                     </div>
                     <div className="bg-black/35 border border-white/5 p-2 rounded">
-                      <span className="block text-[8px] text-white/30 uppercase">Sycall Type</span>
+                      <span className="block text-[8px] text-white/30 uppercase">Syscall Type</span>
                       <strong className="text-rose-400 block mt-0.5 uppercase">{ebpfAlert.syscall}</strong>
                     </div>
                   </>

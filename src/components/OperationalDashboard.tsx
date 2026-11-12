@@ -19,16 +19,30 @@ import {
   Shield,
   FileCode,
   Zap,
-  RefreshCw
+  RefreshCw,
+  Box,
+  Scale,
+  Sparkles,
+  Layers,
+  Smartphone
 } from 'lucide-react';
 import ExportButton from './ExportButton';
+import ThreatFrequencyHeatmap from './ThreatFrequencyHeatmap';
+import AlertFrequencyMiniChart from './AlertFrequencyMiniChart';
 
 interface OperationalDashboardProps {
   setActiveTool: (tool: any) => void;
   triggerToast: (msg: string) => void;
+  ebpfAlerts?: any[];
+  astFindings?: any[];
 }
 
-export default function OperationalDashboard({ setActiveTool, triggerToast }: OperationalDashboardProps) {
+export default function OperationalDashboard({
+  setActiveTool,
+  triggerToast,
+  ebpfAlerts = [],
+  astFindings = []
+}: OperationalDashboardProps) {
   // Hardening dashboard toggles
   const [secureCreds, setSecureCreds] = useState(true);
   const [enforceHttps, setEnforceHttps] = useState(true);
@@ -99,6 +113,11 @@ export default function OperationalDashboard({ setActiveTool, triggerToast }: Op
       const w = canvas.width = canvas.parentElement?.clientWidth || 600;
       const h = canvas.height = 140;
 
+      if (w <= 0 || h <= 0) {
+        requestRef.current = requestAnimationFrame(render);
+        return;
+      }
+
       ctx.clearRect(0, 0, w, h);
 
       // Draw background noise grid
@@ -159,12 +178,14 @@ export default function OperationalDashboard({ setActiveTool, triggerToast }: Op
         points.push([x, finalY]);
       }
 
-      ctx.beginPath();
-      ctx.moveTo(points[0][0], points[0][1]);
-      for (let i = 1; i < points.length; i++) {
-        ctx.lineTo(points[i][0], points[i][1]);
+      if (points.length > 0) {
+        ctx.beginPath();
+        ctx.moveTo(points[0][0], points[0][1]);
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i][0], points[i][1]);
+        }
+        ctx.stroke();
       }
-      ctx.stroke();
 
       // Ambient fill under curve
       ctx.fillStyle = isAnomalous ? 'rgba(244, 63, 94, 0.03)' : 'rgba(0, 240, 255, 0.03)';
@@ -226,14 +247,19 @@ export default function OperationalDashboard({ setActiveTool, triggerToast }: Op
           </p>
         </div>
         
-        <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-between md:justify-end">
           <ExportButton
             id="btn-export-ops-dashboard"
             label="Export Ops Posture"
             filenamePrefix="aegis_operational_posture"
+            className="shrink-0"
             jsonData={{
               module: "VSAT Operational Dashboard & Telemetry Audit",
               utc_time: utcTime,
+              live_session_alerts: {
+                ebpf_alerts_count: ebpfAlerts.length,
+                ast_findings_count: astFindings.length
+              },
               rf_telemetry: {
                 snr_db: metrics.snr,
                 doppler_shift_hz: metrics.doppler,
@@ -252,11 +278,11 @@ export default function OperationalDashboard({ setActiveTool, triggerToast }: Op
               nsa_compliance: "100%",
               timestamp: new Date().toISOString()
             }}
-            textReport={`=== AEGIS VSAT OPERATIONAL DEFENSE AUDIT ===\nDate: ${utcTime}\n\nRF Telemetry Status:\n- Signal-to-Noise Ratio: ${metrics.snr} dB\n- Doppler Shift: ${metrics.doppler} Hz\n- Frame Jitter: ${metrics.jitter} ms\n- Frequency Offset: ${metrics.freqOffset} kHz\n- Anomaly Active: ${isAnomalous ? 'YES' : 'NO'}\n\nHardening Posture:\n- Secure Credentials: ${secureCreds ? 'ENFORCED' : 'DISABLED'}\n- HTTPS/TLS Only: ${enforceHttps ? 'ENFORCED' : 'DISABLED'}\n- VLAN Segmentation: ${vlanSeg ? 'ENFORCED' : 'DISABLED'}\n- Firmware Signatures: ${firmwareSigs ? 'ENFORCED' : 'DISABLED'}\n\nCompliance:\n- NSA CNSA Compliance: 100%\n- CISA KEV Tracked: 2 items`}
+            textReport={`=== AEGIS VSAT OPERATIONAL DEFENSE AUDIT ===\nDate: ${utcTime}\n\nRF Telemetry Status:\n- Signal-to-Noise Ratio: ${metrics.snr} dB\n- Doppler Shift: ${metrics.doppler} Hz\n- Frame Jitter: ${metrics.jitter} ms\n- Frequency Offset: ${metrics.freqOffset} kHz\n- Anomaly Active: ${isAnomalous ? 'YES' : 'NO'}\n\nLive Alert Counts:\n- eBPF Alerts: ${ebpfAlerts.length}\n- AST Findings: ${astFindings.length}\n\nHardening Posture:\n- Secure Credentials: ${secureCreds ? 'ENFORCED' : 'DISABLED'}\n- HTTPS/TLS Only: ${enforceHttps ? 'ENFORCED' : 'DISABLED'}\n- VLAN Segmentation: ${vlanSeg ? 'ENFORCED' : 'DISABLED'}\n- Firmware Signatures: ${firmwareSigs ? 'ENFORCED' : 'DISABLED'}\n\nCompliance:\n- NSA CNSA Compliance: 100%\n- CISA KEV Tracked: 2 items`}
             triggerToast={triggerToast}
             size="xs"
           />
-          <div className="md:max-w-md bg-black/40 border border-white/5 p-2 rounded font-mono text-[9px] text-white/50 leading-relaxed hidden sm:block">
+          <div className="md:max-w-xs bg-black/40 border border-white/5 px-2.5 py-1.5 rounded font-mono text-[9px] text-white/50 leading-snug hidden sm:block">
             <span className="text-rose-400 font-bold uppercase">DISCLAIMER:</span> Interactive simulated ethical toolkit for space cyber resilience testing.
           </div>
         </div>
@@ -283,9 +309,9 @@ export default function OperationalDashboard({ setActiveTool, triggerToast }: Op
         {/* CISA Matches */}
         <div className="bg-[#08080B] border border-white/5 rounded p-4 flex flex-col justify-between">
           <span className="text-[9px] text-white/40 font-mono uppercase tracking-wider">CISA KEV Matches</span>
-          <div className="flex items-baseline gap-2.5 mt-2">
-            <span className="text-2xl font-mono font-light text-rose-400">ACTIVE</span>
-            <span className="text-3xl font-mono font-light text-rose-500">2</span>
+          <div className="flex items-baseline gap-2.5 mt-2 tabular-nums">
+            <span className="text-xl font-mono font-light text-rose-400">ACTIVE</span>
+            <span className="text-2xl font-mono font-light text-rose-500">2</span>
           </div>
           <p className="text-[9px] text-white/30 font-mono mt-1.5 leading-tight">
             Satellite vulnerabilities flagged by CISA
@@ -295,9 +321,9 @@ export default function OperationalDashboard({ setActiveTool, triggerToast }: Op
         {/* Telemetry Accuracy */}
         <div className="bg-[#08080B] border border-white/5 rounded p-4 flex flex-col justify-between">
           <span className="text-[9px] text-white/40 font-mono uppercase tracking-wider">Telemetry Accuracy</span>
-          <div className="flex items-baseline gap-2.5 mt-2">
-            <span className="text-2xl font-mono font-light text-[#00f0ff]">STANDBY</span>
-            <span className="text-3xl font-mono font-light text-[#00f0ff]">99.85%</span>
+          <div className="flex items-baseline gap-2.5 mt-2 tabular-nums">
+            <span className="text-xl font-mono font-light text-[#00f0ff]">STANDBY</span>
+            <span className="text-2xl font-mono font-light text-[#00f0ff]">99.85%</span>
           </div>
           <p className="text-[9px] text-white/30 font-mono mt-1.5 leading-tight">
             Carrier tracking fidelity index
@@ -307,9 +333,9 @@ export default function OperationalDashboard({ setActiveTool, triggerToast }: Op
         {/* NSA Compliance */}
         <div className="bg-[#08080B] border border-white/5 rounded p-4 flex flex-col justify-between">
           <span className="text-[9px] text-white/40 font-mono uppercase tracking-wider">NSA Compliance</span>
-          <div className="flex items-baseline gap-2.5 mt-2">
-            <span className="text-2xl font-mono font-light text-emerald-400">SECURE</span>
-            <span className="text-3xl font-mono font-light text-emerald-400">100%</span>
+          <div className="flex items-baseline gap-2.5 mt-2 tabular-nums">
+            <span className="text-xl font-mono font-light text-emerald-400">SECURE</span>
+            <span className="text-2xl font-mono font-light text-emerald-400">100%</span>
           </div>
           <p className="text-[9px] text-white/30 font-mono mt-1.5 leading-tight">
             Ground station security standards aligned
@@ -319,13 +345,69 @@ export default function OperationalDashboard({ setActiveTool, triggerToast }: Op
         {/* Suite Level */}
         <div className="bg-[#08080B] border border-white/5 rounded p-4 flex flex-col justify-between">
           <span className="text-[9px] text-white/40 font-mono uppercase tracking-wider">Suite Level</span>
-          <div className="flex items-baseline gap-2.5 mt-2">
-            <span className="text-2xl font-mono font-light text-amber-400">ELEVATED</span>
-            <span className="text-sm font-mono font-light text-amber-500">DEFCON 3</span>
+          <div className="flex items-baseline gap-2.5 mt-2 tabular-nums">
+            <span className="text-xl font-mono font-light text-amber-400">ELEVATED</span>
+            <span className="text-xs font-mono font-light text-amber-500">DEFCON 3</span>
           </div>
           <p className="text-[9px] text-white/30 font-mono mt-1.5 leading-tight">
             Based on local Threat Feed indices
           </p>
+        </div>
+      </div>
+
+      {/* 24-Hour Recharts Alert Velocity Mini-Chart & Advanced Defense Modules Launchpad */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="lg:col-span-7 min-w-0">
+          <AlertFrequencyMiniChart
+            ebpfAlerts={ebpfAlerts}
+            astFindings={astFindings}
+            onNavigateToEbpf={() => setActiveTool('ebpf')}
+            onNavigateToAst={() => setActiveTool('ast')}
+          />
+        </div>
+
+        <div className="lg:col-span-5 bg-[#08080B] border border-white/5 rounded p-5 flex flex-col justify-between space-y-4">
+          <div className="space-y-1 border-b border-white/5 pb-3.5">
+            <h3 className="text-xs text-white uppercase tracking-wider font-mono font-semibold flex items-center gap-2">
+              <Layers size={14} className="text-[#00f0ff]" /> Advanced Tactical Modules
+            </h3>
+            <p className="text-[10px] text-white/40 font-mono leading-relaxed">
+              Launch specialized inspection engines, formal provers, and isolated containment sandboxes.
+            </p>
+          </div>
+
+          <div className="divide-y divide-white/5 font-mono">
+            {[
+              { id: 'iphone-diagnostics', label: 'iPhone Deep Diagnostics', sub: 'USB cable, Bluetooth LE & internet tether', icon: Smartphone },
+              { id: 'waf', label: 'Adaptive WAF Firewall', sub: 'OWASP CRS & payload rule inspection', icon: Shield },
+              { id: 'sandbox', label: 'Detonation Sandbox', sub: 'Micro-VM behavioral trace & ATT&CK', icon: Box },
+              { id: 'wireless', label: 'Wireless & RF Auditor', sub: '802.11 rogue AP & deauth burst scan', icon: Wifi },
+              { id: 'smt-verifier', label: 'SMT Constant-Time Prover', sub: 'Formal timing side-channel verification', icon: Scale },
+              { id: 'yara', label: 'YARA Rule Compiler', sub: 'Binary byte-pattern rule evaluation', icon: FileCode },
+              { id: 'ai-coprocessor', label: 'AI Threat Coprocessor', sub: 'Automated triage & remediation guidance', icon: Sparkles }
+            ].map((mod) => {
+              const Icon = mod.icon;
+              return (
+                <button
+                  key={mod.id}
+                  type="button"
+                  onClick={() => setActiveTool(mod.id)}
+                  className="w-full py-2.5 flex items-center justify-between gap-3 text-left hover:bg-white/[0.02] px-1.5 rounded transition-colors cursor-pointer group"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Icon size={13} className="text-[#00f0ff] shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-[11px] text-zinc-200 group-hover:text-[#00f0ff] transition-colors truncate">
+                        {mod.label}
+                      </div>
+                      <div className="text-[9px] text-white/35 truncate">{mod.sub}</div>
+                    </div>
+                  </div>
+                  <ChevronRight size={12} className="text-white/30 group-hover:text-[#00f0ff] shrink-0" />
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -433,26 +515,26 @@ export default function OperationalDashboard({ setActiveTool, triggerToast }: Op
         {/* Live RF Monitor */}
         <div className="lg:col-span-7 bg-[#08080B] border border-white/5 rounded p-5 flex flex-col justify-between">
           <div>
-            <div className="flex justify-between items-start">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
               <div className="space-y-1">
                 <h3 className="text-xs text-white uppercase tracking-wider font-mono font-semibold flex items-center gap-2">
-                  <Radio size={14} className={isAnomalous ? 'text-rose-400 animate-pulse' : 'text-[#00f0ff]'} /> 📡 Live RF Signal & Telemetry Monitor
+                  <Radio size={14} className={isAnomalous ? 'text-rose-400 animate-pulse' : 'text-[#00f0ff]'} /> Live RF Signal &amp; Telemetry Monitor
                 </h3>
                 <p className="text-[10px] text-white/40 font-mono leading-relaxed">
                   Simulating live signal metrics matching real-time VSAT transit conditions.
                 </p>
               </div>
               
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2 shrink-0">
                 <button
                   onClick={handleInjectAnomaly}
-                  className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded text-[9px] font-bold text-rose-400 font-mono uppercase tracking-wider transition-all cursor-pointer"
+                  className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded text-[9px] font-bold text-rose-400 font-mono uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap"
                 >
                   Inject Signal Anomaly
                 </button>
                 <button
                   onClick={handleStabilize}
-                  className="px-3 py-1.5 bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 border border-[#00f0ff]/30 rounded text-[9px] font-bold text-[#00f0ff] font-mono uppercase tracking-wider transition-all cursor-pointer"
+                  className="px-2.5 py-1.5 bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 border border-[#00f0ff]/30 rounded text-[9px] font-bold text-[#00f0ff] font-mono uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap"
                 >
                   Re-Stabilize Waveforms
                 </button>
@@ -477,7 +559,7 @@ export default function OperationalDashboard({ setActiveTool, triggerToast }: Op
             <div className="bg-black/20 p-2.5 rounded border border-white/5">
               <span className="text-[8px] text-white/30 font-mono uppercase">Doppler Offset</span>
               <p className={`text-sm font-mono font-light mt-0.5 ${isAnomalous ? 'text-rose-400 font-semibold' : 'text-zinc-200'}`}>
-                {metrics.doppler >= 100 ? '+' : '+'}{metrics.doppler} Hz
+                {metrics.doppler >= 0 ? '+' : ''}{metrics.doppler} Hz
               </p>
             </div>
 
@@ -497,6 +579,12 @@ export default function OperationalDashboard({ setActiveTool, triggerToast }: Op
           </div>
         </div>
       </div>
+
+      {/* 24-Hour Threat Archive Frequency Heatmap */}
+      <ThreatFrequencyHeatmap
+        onNavigateToArchive={() => setActiveTool('archive')}
+        onNavigateToEbpf={() => setActiveTool('ebpf')}
+      />
 
       {/* Integrated Suite Section */}
       <div className="bg-[#08080B] border border-white/5 rounded p-6 space-y-6">
@@ -549,18 +637,18 @@ export default function OperationalDashboard({ setActiveTool, triggerToast }: Op
             </p>
           </div>
           
-          <div className="flex gap-3 shrink-0">
+          <div className="flex flex-wrap gap-3 shrink-0">
             <button
               onClick={() => setActiveTool('vuln-scanner')}
-              className="px-4 py-2 bg-transparent hover:bg-white/5 border border-white/10 rounded text-[10px] font-bold text-zinc-300 font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer"
+              className="px-4 py-2 bg-transparent hover:bg-white/5 border border-white/10 rounded text-[10px] font-bold text-zinc-300 font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
             >
-              🔍 Launch Vuln Scanner (Step 1) <ArrowRight size={12} className="text-[#00f0ff]" />
+              Launch Vuln Scanner (Step 1) <ArrowRight size={12} className="text-[#00f0ff]" />
             </button>
             <button
               onClick={() => setActiveTool('penetration-framework')}
-              className="px-4 py-2 bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 border border-[#00f0ff]/30 rounded text-[10px] font-bold text-[#00f0ff] font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer"
+              className="px-4 py-2 bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 border border-[#00f0ff]/30 rounded text-[10px] font-bold text-[#00f0ff] font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
             >
-              🎯 Open Penetration Frame (Step 2) <ArrowRight size={12} />
+              Open Penetration Frame (Step 2) <ArrowRight size={12} />
             </button>
           </div>
         </div>

@@ -164,11 +164,18 @@ AUDITSTAMP: Kernel ring buffer size expanded by system admin (PID: 1012)`,
         return;
       }
 
-      const data = await response.json();
-      if (data.success && data.text) {
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        const msg = data?.error || `HTTP ${response.status} ${response.statusText}`;
+        setResponseText(`### 🟥 Heuristic Compilation Failure\n\n${msg}`);
+        if (triggerToast) triggerToast('Error compiling secure report: Check server credentials.');
+        return;
+      }
+
+      if (data?.success && data?.text) {
         setResponseText(data.text);
         if (triggerToast) triggerToast('SecOps AI Forensics report successfully compiled.');
-      } else if (data.error) {
+      } else if (data?.error) {
         setResponseText(`### 🟥 Heuristic Compilation Failure\n\n${data.error}`);
         if (triggerToast) triggerToast('Error compiling secure report: Check server credentials.');
       } else {

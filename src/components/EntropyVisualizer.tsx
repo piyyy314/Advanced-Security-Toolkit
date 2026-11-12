@@ -7,9 +7,10 @@ import ExportButton from './ExportButton';
 interface EntropyVisualizerProps {
   onMetricsComputed?: (bytesLen: number, score: number) => void;
   triggerToast?: (msg: string) => void;
+  importedData?: { content: string; seq: number } | null;
 }
 
-export default function EntropyVisualizer({ onMetricsComputed, triggerToast }: EntropyVisualizerProps = {}) {
+export default function EntropyVisualizer({ onMetricsComputed, triggerToast, importedData }: EntropyVisualizerProps = {}) {
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
   const [entropyResults, setEntropyResults] = useState<{ offset: number; value: number }[]>([]);
   const [globalEntropy, setGlobalEntropy] = useState<number>(0);
@@ -91,7 +92,7 @@ export default function EntropyVisualizer({ onMetricsComputed, triggerToast }: E
 
   return (
     <div className="space-y-6">
-      <EntropyCalculator onAnalyzeFinished={handleAnalyzeFinished} />
+      <EntropyCalculator onAnalyzeFinished={handleAnalyzeFinished} importedData={importedData} />
 
       {bytes && hasResults && (
         <motion.div

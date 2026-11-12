@@ -1,6 +1,15 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { initializeApp, getApps, getApp, type FirebaseOptions } from 'firebase/app';
+import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut, type Auth } from 'firebase/auth';
+
+const firebaseConfigModules = import.meta.glob('../../firebase-applet-config.json', { eager: true }) as Record<
+  string,
+  { default?: FirebaseOptions } & FirebaseOptions
+>;
+const firstConfigModule = Object.values(firebaseConfigModules)[0];
+const resolvedConfig: FirebaseOptions | null = firstConfigModule
+  ? (firstConfigModule.default ?? firstConfigModule)
+  : null;
+const hasValidFirebaseConfig = Boolean(resolvedConfig && resolvedConfig.apiKey && resolvedConfig.projectId);
 
 export const GOOGLE_DRIVE_SCOPES = [
   'https://www.googleapis.com/auth/drive',
@@ -18,8 +27,20 @@ export const GOOGLE_DRIVE_SCOPES = [
   'https://www.googleapis.com/auth/drive.scripts'
 ];
 
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+let firebaseAuthInstance: Auth | null = null;
+if (hasValidFirebaseConfig && resolvedConfig) {
+  try {
+    const app = getApps().length > 0 ? getApp() : initializeApp(resolvedConfig);
+    firebaseAuthInstance = getAuth(app);
+  } catch (err) {
+    console.warn('Firebase Drive Vault initialization skipped:', err);
+    firebaseAuthInstance = null;
+  }
+}
+
+export const auth: Auth | null = firebaseAuthInstance;
+
+export const isDriveConfigured = (): boolean => Boolean(firebaseAuthInstance);
 
 const provider = new GoogleAuthProvider();
 GOOGLE_DRIVE_SCOPES.forEach(scope => {
@@ -36,7 +57,13 @@ export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
-  return onAuthStateChanged(auth, async (user: User | null) => {
+  if (!firebaseAuthInstance) {
+    cachedAccessToken = null;
+    if (onAuthFailure) onAuthFailure();
+    return () => {};
+  }
+
+  return onAuthStateChanged(firebaseAuthInstance, async (user: User | null) => {
     if (user) {
       if (cachedAccessToken) {
         if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
@@ -52,9 +79,13 @@ export const initAuth = (
 };
 
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+  if (!firebaseAuthInstance) {
+    throw new Error('Google Drive Vault requires firebase-applet-config.json (Firebase & OAuth setup not configured).');
+  }
+
   try {
     isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
+    const result = await signInWithPopup(firebaseAuthInstance, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
       throw new Error('Failed to obtain Google Drive OAuth access token from Firebase Auth');
@@ -75,6 +106,7 @@ export const getAccessToken = async (): Promise<string | null> => {
 };
 
 export const logout = async () => {
-  await signOut(auth);
   cachedAccessToken = null;
+  if (!firebaseAuthInstance) return;
+  await signOut(firebaseAuthInstance);
 };

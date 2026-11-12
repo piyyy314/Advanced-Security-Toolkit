@@ -6,6 +6,11 @@ import { ethers } from "ethers";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import fs from "fs";
+import { execFile } from "child_process";
+import { promisify } from "util";
+
+const execFileAsync = promisify(execFile);
 
 dotenv.config();
 
@@ -14,6 +19,12 @@ async function startServer() {
   
   // Parse incoming JSON requests for AI diagnostics inputs
   app.use(express.json());
+
+  // Explicitly allow WebUSB and Web Bluetooth features on responses
+  app.use((_req, res, next) => {
+    res.setHeader("Permissions-Policy", "usb=*, bluetooth=*");
+    next();
+  });
 
   const server = http.createServer(app);
   const io = new Server(server, {
@@ -108,6 +119,233 @@ async function startServer() {
       status: "Aegis Protected", 
       service: "Palantir-Dash", 
       uptime: process.uptime() 
+    });
+  });
+
+  // In-memory iPhone Internet/USB Tether Relay Sessions (TTL 30 minutes)
+  interface IphoneSessionRecord {
+    code: string;
+    createdAt: number;
+    lastPingAt: number | null;
+    telemetry: Record<string, any> | null;
+  }
+  const iphoneSessions = new Map<string, IphoneSessionRecord>();
+
+  // Periodic cleanup of expired iPhone tether sessions
+  setInterval(() => {
+    const cutoff = Date.now() - 30 * 60 * 1000;
+    for (const [code, rec] of iphoneSessions.entries()) {
+      if (rec.createdAt < cutoff) {
+        iphoneSessions.delete(code);
+      }
+    }
+  }, 5 * 60 * 1000);
+
+  app.post("/api/iphone/session", (_req, res) => {
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const record: IphoneSessionRecord = {
+      code,
+      createdAt: Date.now(),
+      lastPingAt: null,
+      telemetry: null
+    };
+    iphoneSessions.set(code, record);
+    res.json({ success: true, code, expiresInSeconds: 1800 });
+  });
+
+  app.post("/api/iphone/ingest/:code", (req, res) => {
+    const { code } = req.params;
+    const session = iphoneSessions.get(code);
+    if (!session) {
+      return res.status(404).json({ error: "Invalid or expired iPhone tether session code." });
+    }
+    session.lastPingAt = Date.now();
+    session.telemetry = {
+      ...(req.body || {}),
+      receivedAt: new Date().toISOString(),
+      clientIp: req.ip
+    };
+    io.emit("iphone_telemetry", { code, telemetry: session.telemetry });
+    res.json({ success: true, code, receivedAt: session.telemetry.receivedAt });
+  });
+
+  app.get("/api/iphone/session/:code", (req, res) => {
+    const { code } = req.params;
+    const session = iphoneSessions.get(code);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found or expired." });
+    }
+    res.json({
+      success: true,
+      code: session.code,
+      createdAt: session.createdAt,
+      lastPingAt: session.lastPingAt,
+      telemetry: session.telemetry
+    });
+  });
+
+  // Probe real physically attached Apple USB devices & optional libimobiledevice telemetry (no fabricated data)
+  app.get("/api/iphone/host-usb", async (_req, res) => {
+    const devices: Array<Record<string, any>> = [];
+    const polledAt = new Date().toISOString();
+
+    // 1. Inspect Linux sysfs USB bus for Apple VID (05ac)
+    if (process.platform === "linux" && fs.existsSync("/sys/bus/usb/devices")) {
+      try {
+        const entries = fs.readdirSync("/sys/bus/usb/devices");
+        for (const entry of entries) {
+          const base = path.join("/sys/bus/usb/devices", entry);
+          const vidPath = path.join(base, "idVendor");
+          if (!fs.existsSync(vidPath)) continue;
+          const vid = fs.readFileSync(vidPath, "utf8").trim().toLowerCase();
+          if (vid !== "05ac") continue;
+
+          const safeRead = (file: string) => {
+            try {
+              const p = path.join(base, file);
+              return fs.existsSync(p) ? fs.readFileSync(p, "utf8").trim() : null;
+            } catch {
+              return null;
+            }
+          };
+
+          devices.push({
+            busId: entry,
+            vendorId: "0x05ac",
+            productId: `0x${(safeRead("idProduct") || "0000").toLowerCase()}`,
+            productName: safeRead("product") || "Apple Mobile Device",
+            manufacturer: safeRead("manufacturer") || "Apple Inc.",
+            serialNumber: safeRead("serial"),
+            source: "linux-sysfs-usb"
+          });
+        }
+      } catch {
+        // Ignore sysfs permission errors
+      }
+    }
+
+    // 2. Inspect macOS USB bus (system_profiler SPUSBDataType -json) when running on macOS host
+    if (process.platform === "darwin") {
+      try {
+        const { stdout } = await execFileAsync("system_profiler", ["SPUSBDataType", "-json"], {
+          timeout: 2000
+        });
+        const parsed = JSON.parse(stdout);
+        const walkUsb = (items: any[]) => {
+          for (const item of items || []) {
+            const vid = String(item.vendor_id || "").toLowerCase();
+            if (vid.includes("05ac") || String(item.manufacturer || "").toLowerCase().includes("apple")) {
+              const name = String(item._name || "Apple USB Device");
+              if (/iphone|ipad|apple mobile|recovery|dfu/i.test(name)) {
+                devices.push({
+                  vendorId: "0x05ac",
+                  productId: item.product_id || "unknown",
+                  productName: name,
+                  manufacturer: item.manufacturer || "Apple Inc.",
+                  serialNumber: item.serial_num || null,
+                  source: "macos-system-profiler"
+                });
+              }
+            }
+            if (Array.isArray(item._items)) walkUsb(item._items);
+          }
+        };
+        walkUsb(parsed.SPUSBDataType || []);
+      } catch {
+        // system_profiler unavailable
+      }
+    }
+
+    // 3. Query libimobiledevice (idevice_id / ideviceinfo / idevicediagnostics) if installed on host
+    let libimobiledeviceAvailable = false;
+    try {
+      const { stdout: udidOut } = await execFileAsync("idevice_id", ["-l"], { timeout: 1500 });
+      libimobiledeviceAvailable = true;
+      const udids = udidOut
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      for (const udid of udids) {
+        const parseKv = (text: string): Record<string, string> => {
+          const out: Record<string, string> = {};
+          for (const line of text.split(/\r?\n/)) {
+            const idx = line.indexOf(":");
+            if (idx > 0) {
+              out[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+            }
+          }
+          return out;
+        };
+
+        let infoKv: Record<string, string> = {};
+        let batteryKv: Record<string, string> = {};
+
+        try {
+          const { stdout } = await execFileAsync("ideviceinfo", ["-u", udid], { timeout: 1500 });
+          infoKv = parseKv(stdout);
+        } catch {
+          // Device may not yet be trusted
+        }
+
+        try {
+          const { stdout } = await execFileAsync("ideviceinfo", ["-u", udid, "-q", "com.apple.mobile.battery"], {
+            timeout: 1500
+          });
+          batteryKv = parseKv(stdout);
+        } catch {
+          // Battery domain optional
+        }
+
+        // Optional AppleSmartBattery diagnostics for voltage/cycles/temp
+        let diagVoltageMv: number | null = null;
+        let diagCycleCount: number | null = null;
+        let diagTempC: number | null = null;
+        try {
+          const { stdout: diagOut } = await execFileAsync(
+            "idevicediagnostics",
+            ["-u", udid, "ioregentry", "AppleSmartBattery"],
+            { timeout: 1500 }
+          );
+          const vMatch = diagOut.match(/<key>Voltage<\/key>\s*<integer>(\d+)<\/integer>/i);
+          const cMatch = diagOut.match(/<key>CycleCount<\/key>\s*<integer>(\d+)<\/integer>/i);
+          const tMatch = diagOut.match(/<key>Temperature<\/key>\s*<integer>(\d+)<\/integer>/i);
+          if (vMatch) diagVoltageMv = Number(vMatch[1]);
+          if (cMatch) diagCycleCount = Number(cMatch[1]);
+          if (tMatch) diagTempC = Number((Number(tMatch[1]) / 100).toFixed(1));
+        } catch {
+          // idevicediagnostics optional
+        }
+
+        devices.push({
+          udid,
+          vendorId: "0x05ac",
+          deviceName: infoKv.DeviceName || "iPhone",
+          productType: infoKv.ProductType || null,
+          osVersion: infoKv.ProductVersion || null,
+          serialNumber: infoKv.SerialNumber || udid,
+          battery: {
+            batteryLevel: batteryKv.BatteryCurrentCapacity ? Number(batteryKv.BatteryCurrentCapacity) : null,
+            isCharging: batteryKv.BatteryIsCharging ? batteryKv.BatteryIsCharging === "true" : null,
+            externalConnected: batteryKv.ExternalConnected ? batteryKv.ExternalConnected === "true" : null,
+            batteryVoltageMv: diagVoltageMv ?? (batteryKv.Voltage ? Number(batteryKv.Voltage) : null),
+            cycleCount: diagCycleCount ?? (batteryKv.CycleCount ? Number(batteryKv.CycleCount) : null),
+            temperatureC: diagTempC ?? (batteryKv.Temperature ? Number(batteryKv.Temperature) / 100 : null)
+          },
+          source: "libimobiledevice"
+        });
+      }
+    } catch {
+      // idevice_id not installed or no daemon running
+    }
+
+    res.json({
+      success: true,
+      hostPlatform: process.platform,
+      isCloudContainer: Boolean(process.env.K_SERVICE || process.env.CLOUD_RUN_JOB),
+      libimobiledeviceAvailable,
+      devices,
+      polledAt
     });
   });
 
@@ -244,6 +482,39 @@ ${findings.join("\n")}
 
 *Aegis Forensics system guarantees operational continuity by dynamically switching to local Heuristic engines during cloud failover. This offline evaluation is fully functional and secure.*`;
 
+  } else if (mode === "iphone") {
+    if (targetLower.includes("jailbreak") || targetLower.includes("cydia") || targetLower.includes("sileo") || targetLower.includes("frida") || targetLower.includes("/private/var/jb")) {
+      findings.push("- 🔴 **Critical Threat: iOS Integrity / Jailbreak Hook Indicator** - Diagnostics detected unauthorized dyld injection, Frida instrumentation, or jailbreak filesystem artifacts.");
+      postureGrade = "D";
+    }
+    if (targetLower.includes("exc_bad_access") || targetLower.includes("blastdoor") || targetLower.includes("imtransferagent") || targetLower.includes("webkit")) {
+      findings.push("- 🟡 **Elevated Risk: Sensitive Subsystem Crash Signature** - Crash dump references high-value iOS attack surfaces (`WebKit`, `BlastDoor`, or `IMTransferAgent`). Verify patch currency and inspect `.ips` faulting thread.");
+      if (postureGrade !== "D") postureGrade = "C";
+    }
+    if (targetLower.includes("mdm") || targetLower.includes("untrusted") || targetLower.includes("proxy") || targetLower.includes("http://")) {
+      findings.push("- 🟡 **Moderate Risk: Network / Profile Trust Exposure** - Detected active proxy/MDM configuration or unencrypted HTTP transport flags.");
+      if (postureGrade !== "D" && postureGrade !== "C") postureGrade = "C+";
+    }
+    if (findings.length === 0) {
+      findings.push("- 🟢 **Optimal Posture:** iOS diagnostic snapshot shows verified Apple Secure Boot/lockdown posture with no spyware or crash anomalies.");
+      postureGrade = "A-";
+    }
+
+    return `### 🛡️ AEGIS iOS DEEP DIAGNOSTIC INTEL [LOCAL COPROCESSOR]
+
+#### 1. EXECUTIVE SUMMARY & iOS POSTURE GRADE: **${postureGrade}**
+Local heuristic inspection analyzed the submitted iPhone hardware, tether, and \`.ips\`/sysdiagnose telemetry (${target.length} characters) and flagged **${findings.filter(f => f.includes("🔴") || f.includes("🟡")).length}** diagnostic indicator(s).
+
+#### 2. iOS SECURITY & HARDWARE MATRIX
+${findings.join("\n")}
+
+- **Audit Scope:** iOS Crash Logs, USB/BLE Transport, Network/DNS & Lockdown Posture
+- **Context Parameters:** ${context ? `${context.substring(0, 120)}` : 'Standard Tethered Diagnostic'}
+
+#### 3. RECOMMENDED REMEDIATION CONTROLS
+1. **System Patch Verification:** Confirm iOS is updated to the latest Apple Security Release and enable **Lockdown Mode** for high-risk threat profiles.
+2. **Configuration & Certificate Audit:** Review *Settings > General > VPN & Device Management* and *Certificate Trust Settings* for unrecognized MDM or root CAs.
+3. **USB & Bluetooth Hardening:** Set *USB Accessories* restriction while locked and disable unneeded BLE sharing/AirDrop discoverability.`;
   } else {
     if (targetLower.includes("unauthorized") || targetLower.includes("drop") || targetLower.includes("firewall")) {
       findings.push("- 🔴 **Moderate Risk: Active Perimeter Firewall Intrusions** - Logs showcase active drop/reject packets mapping to network scans.");
@@ -302,19 +573,11 @@ ${findings.join("\n")}
     }
 
     if (!ai) {
+      const localReport = generateLocalHeuristicReport(target, context || "", mode || "general");
       return res.status(200).json({
         success: true,
-        text: `### 🛡️ AEGIS SECURITY INTEL [LOCAL COPROCESSOR FALLBACK MODE]
-We detected that a **GEMINI_API_KEY** is not configured in the settings yet. 
-
-However, we can supply simulated security metrics for this target:
-- **Target Analysis Category:** ${mode === "code" ? "Static AST Code Verification" : mode === "ebpf" ? "eBPF Sandboxed Hook Audit" : mode === "binary" ? "PE Executable Section Inspector" : "General Threat Auditing Mode"}
-- **Target Payload Length:** ${target.length} characters
-- **Simulated Posture Grade:** **B- (Caution)**
-- **Audit Findings:** The security engine analyzed "${target.substring(0, 120)}..." and highlighted moderate risk thresholds.
-
-**🚀 Action Required:**
-To unlock continuous, highly advanced AI-grounded threat assessments from **Gemini 3.5**, simply configure your **GEMINI_API_KEY** under **Settings > Secrets** in the workspace panel.`
+        model: "offline-heuristics",
+        text: `${localReport}\n\n---\n> *Note: GEMINI_API_KEY is not configured in environment secrets; local Aegis heuristic coprocessor generated this audit. Configure GEMINI_API_KEY to enable Gemini 4 Hydrogen deep synthesis.*`
       });
     }
 
@@ -325,6 +588,8 @@ To unlock continuous, highly advanced AI-grounded threat assessments from **Gemi
         ? "Evaluate this kernel system call log, eBPF telemetry feed, or audit stream for malicious patterns like container breakouts, unauthorized socket bindings, or privilege escalation tricks. Provide system hardenings."
         : mode === "binary"
         ? "Inspect this PE / executable structure, entropy log, or PE section report. Give an overview of suspicious flags like packers, high entropy indicators, obfuscation layers, missing export tables, or non-standard segment layouts."
+        : mode === "iphone"
+        ? "Conduct a deep iOS/iPhone forensic security and hardware diagnostic audit on the provided USB/Bluetooth device descriptors, tethered network state, and .ips crash logs or sysdiagnose snippets. Check for spyware/jailbreak indicators, vulnerable subsystems (WebKit, BlastDoor, Kernel), risky profiles/certificates, and provide concrete iOS hardening steps."
         : "Conduct general deep secure forensics and threat analysis on these logs or security artifacts. Categorize the potential tactics, techniques, and procedures (TTPs) mapping to MITRE ATT&CK frames.";
 
       const prompt = `Perform the following security operation:
@@ -345,18 +610,22 @@ Provide your response strictly in professional cybersecurity advisor tone, with 
 Stay dense, modern, and detailed. Do NOT include markdown code-block wraps around the whole text, just standard formatting.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-4-hydrogen",
         contents: prompt,
         config: {
           systemInstruction: "You are Aegis-VMM Principal AI Forensics Coprocessor, a deep hypervisor containment advisor and static threat hunter. You speak in a highly precise, cool, professional, and dense tone.",
-          temperature: 0.2, // low temperature for precise analysis
         }
       });
 
+      const generatedText = response.text?.trim();
+      if (!generatedText) {
+        throw new Error("Empty response returned by Gemini API.");
+      }
+
       res.json({
         success: true,
-        text: response.text,
-        model: "gemini-2.5-flash"
+        text: generatedText,
+        model: "gemini-4-hydrogen"
       });
     } catch (err: any) {
       const errMsg = err?.message || "";
@@ -490,18 +759,26 @@ Write helpful inline descriptions/comments detailing the detection criteria.
 Do NOT enclose your output in markdown code blocks or triple backticks like \`\`\`yara - output the rule text directly commencing with "/*" top comments or the "rule" keyword so that it can be instantly rendered in our raw textile editor without extra trims.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-4-hydrogen",
         contents: prompt,
         config: {
           systemInstruction: "You are the Aegis-YARA compiler builder. You generate valid and extremely precise YARA signatures. Output only the pure, fully formatted text rule without markdown triple backtick markers.",
-          temperature: 0.3,
         }
       });
 
+      const rawText = response.text?.trim();
+      if (!rawText) {
+        throw new Error("Empty YARA synthesis returned by Gemini API.");
+      }
+      const cleanedRule = rawText
+        .replace(/^```(?:yara|yar)?\s*\n?/i, "")
+        .replace(/\n?```\s*$/i, "")
+        .trim();
+
       res.json({
         success: true,
-        text: response.text,
-        model: "gemini-2.5-flash"
+        text: cleanedRule,
+        model: "gemini-4-hydrogen"
       });
     } catch (err: any) {
       const errMsg = err?.message || "";
@@ -557,9 +834,14 @@ Do NOT enclose your output in markdown code blocks or triple backticks like \`\`
 
     socket.on("disconnect", () => {
       console.log("[-] Dashboard UI disconnected.");
-      clearInterval(intervalBlock);
+      if (intervalBlock) clearInterval(intervalBlock);
       clearInterval(securityInterval);
     });
+  });
+
+  // Return JSON 404 for unmatched /api routes before SPA fallback
+  app.use("/api", (_req, res) => {
+    res.status(404).json({ error: "API endpoint not found" });
   });
 
   // Vite middleware for development

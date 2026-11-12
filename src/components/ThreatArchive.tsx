@@ -169,12 +169,14 @@ export default function ThreatArchive({ triggerToast }: ThreatArchiveProps = {})
     } else {
       localStorage.setItem('aegis_threat_archive', JSON.stringify(SEED_THREATS));
       setThreats(SEED_THREATS);
+      window.dispatchEvent(new Event('aegis-archive-updated'));
     }
   }, []);
 
   const saveToStorage = (updatedList: ArchivedThreat[]) => {
     setThreats(updatedList);
     localStorage.setItem('aegis_threat_archive', JSON.stringify(updatedList));
+    window.dispatchEvent(new Event('aegis-archive-updated'));
   };
 
   // Automatically update the notes fields
@@ -314,7 +316,7 @@ export default function ThreatArchive({ triggerToast }: ThreatArchiveProps = {})
       case 'high':
         return <span className="text-rose-400 font-bold tracking-wide text-[8.5px] bg-rose-950/20 px-1.5 py-0.5 border border-rose-900/30 rounded uppercase">CRITICAL</span>;
       case 'medium':
-        return <span className="text-amber-300 font-bold tracking-wide text-[8.5px] bg-amber-955/20 px-1.5 py-0.5 border border-amber-900/30 rounded uppercase">MEDIUM</span>;
+        return <span className="text-amber-300 font-bold tracking-wide text-[8.5px] bg-amber-950/20 px-1.5 py-0.5 border border-amber-900/30 rounded uppercase">MEDIUM</span>;
       default:
         return <span className="text-blue-400 font-bold tracking-wide text-[8.5px] bg-blue-950/20 px-1.5 py-0.5 border border-blue-900/30 rounded uppercase">LOW</span>;
     }
@@ -401,7 +403,7 @@ export default function ThreatArchive({ triggerToast }: ThreatArchiveProps = {})
               placeholder="Search details, note signatures, payloads..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-black/70 border border-white/5 hover:border-white/10 focus:border-[#00f0ff]/50 rounded px-8 py-2 text-zinc-300 placeholder-zinc-650 focus:outline-none font-mono text-[10px] transition-all"
+              className="w-full bg-black/70 border border-white/5 hover:border-white/10 focus:border-[#00f0ff]/50 rounded px-8 py-2 text-zinc-300 placeholder-zinc-600 focus:outline-none font-mono text-[10px] transition-all"
             />
           </div>
 
@@ -593,7 +595,7 @@ export default function ThreatArchive({ triggerToast }: ThreatArchiveProps = {})
       <div className="grid grid-cols-1 lg:grid-cols-12 min-h-[480px]">
         {/* Left Side: Incidents ledger */}
         <div className="lg:col-span-7 bg-[#050507] border-r border-white/5 p-4 space-y-3 max-h-[500px] overflow-y-auto">
-          <div className="flex items-center justify-between text-zinc-550 text-[9px] border-b border-dashed border-zinc-900 pb-1.5 mb-2 select-none">
+          <div className="flex items-center justify-between text-zinc-500 text-[9px] border-b border-dashed border-zinc-900 pb-1.5 mb-2 select-none">
             <span>SHOWING {filteredThreats.length} OF {threats.length} DURABLE THREAT LOGS</span>
             <div className="space-x-1.5">
               <button 
@@ -613,7 +615,7 @@ export default function ThreatArchive({ triggerToast }: ThreatArchiveProps = {})
           </div>
 
           {filteredThreats.length === 0 ? (
-            <div className="py-24 text-center text-zinc-650 font-mono italic">
+            <div className="py-24 text-center text-zinc-600 font-mono italic">
               &lt;No preserved security alerts reported under selected filters&gt;
             </div>
           ) : (
@@ -639,7 +641,7 @@ export default function ThreatArchive({ triggerToast }: ThreatArchiveProps = {})
                           <div className="flex items-center gap-2">
                             <span className={`text-[8.5px] uppercase font-bold px-1.5 rounded tracking-wide ${
                               threat.category === 'ebpf' 
-                                ? 'bg-fuchsia-905/20 text-fuchsia-400 border border-fuchsia-900/30' 
+                                ? 'bg-fuchsia-950/20 text-fuchsia-400 border border-fuchsia-900/30' 
                                 : 'bg-sky-950/20 text-sky-400 border border-sky-900/30'
                             }`}>
                               {threat.category}
@@ -651,14 +653,16 @@ export default function ThreatArchive({ triggerToast }: ThreatArchiveProps = {})
                           <h4 className={`text-xs font-semibold leading-relaxed mt-1 ${isSelected ? 'text-zinc-100' : 'text-zinc-300'}`}>
                             {threat.name}
                           </h4>
-                          <p className="text-[10px] text-zinc-550 leading-relaxed font-mono truncate max-w-md">
+                          <p className="text-[10px] text-zinc-500 leading-relaxed font-mono truncate max-w-md">
                             {threat.details}
                           </p>
                         </div>
                         
                         <div className="flex flex-col items-end shrink-0 select-none space-y-1.5">
-                          <span className="text-[9px] text-zinc-550 italic font-mono">
-                            {threat.timestamp.split('T')[1].substring(0, 8)}
+                          <span className="text-[9px] text-zinc-500 italic font-mono">
+                            {threat.timestamp?.includes('T')
+                              ? threat.timestamp.split('T')[1].substring(0, 8)
+                              : (threat.timestamp || 'N/A')}
                           </span>
                           <button
                             onClick={(e) => {
@@ -691,17 +695,17 @@ export default function ThreatArchive({ triggerToast }: ThreatArchiveProps = {})
                   <div className="text-[8px] font-bold tracking-wider text-white/30 uppercase flex items-center gap-1 select-none">
                     <Clock size={10} /> Preserved incident ID: <strong className="text-[#00f0ff] font-semibold">{activeThreat.id}</strong>
                   </div>
-                  <h4 className="text-sm font-serif font-light text-zinc-100 mt-1 lines-clamp-2 leading-relaxed">
+                  <h4 className="text-sm font-serif font-light text-zinc-100 mt-1 line-clamp-2 leading-relaxed">
                     {activeThreat.name}
                   </h4>
-                  <p className="text-[9px] text-zinc-550 font-mono mt-1 select-all">
+                  <p className="text-[9px] text-zinc-500 font-mono mt-1 select-all">
                     Time Filed: {new Date(activeThreat.timestamp).toLocaleString()}
                   </p>
                 </div>
 
                 {/* Main description section */}
                 <div className="space-y-1">
-                  <div className="text-[8.5px] text-zinc-550 font-bold uppercase tracking-wider select-none">Incident Narrative Details</div>
+                  <div className="text-[8.5px] text-zinc-500 font-bold uppercase tracking-wider select-none">Incident Narrative Details</div>
                   <p className="text-zinc-300 text-[11.5px] leading-relaxed font-sans font-light select-all">
                     {activeThreat.details}
                   </p>
@@ -709,7 +713,7 @@ export default function ThreatArchive({ triggerToast }: ThreatArchiveProps = {})
 
                 {/* Raw Execution Payload box */}
                 <div className="space-y-1.5">
-                  <div className="text-[8.5px] text-zinc-550 font-bold uppercase tracking-wider flex items-center justify-between select-none">
+                  <div className="text-[8.5px] text-zinc-500 font-bold uppercase tracking-wider flex items-center justify-between select-none">
                     <span>Raw Execution Context / Syscall Args</span>
                     <span className="text-[8px] text-rose-400 uppercase tracking-widest font-bold">Unsanitized Payload</span>
                   </div>
@@ -744,7 +748,7 @@ export default function ThreatArchive({ triggerToast }: ThreatArchiveProps = {})
                 {/* Persistent Notes section */}
                 <div className="space-y-2 border-t border-white/5 pt-3">
                   <div className="flex items-center justify-between select-none">
-                    <span className="text-[8.5px] text-zinc-550 font-bold uppercase tracking-wider flex items-center gap-1">
+                    <span className="text-[8.5px] text-zinc-500 font-bold uppercase tracking-wider flex items-center gap-1">
                       <FileText size={11} className="text-[#00f0ff]" /> Researcher Annotations & Notes
                     </span>
                     {!isEditingNotes ? (
@@ -800,7 +804,7 @@ export default function ThreatArchive({ triggerToast }: ThreatArchiveProps = {})
 
             </div>
           ) : (
-            <div className="flex-1 flex flex-col justify-center items-center text-center p-8 select-none text-zinc-650 font-mono italic">
+            <div className="flex-1 flex flex-col justify-center items-center text-center p-8 select-none text-zinc-600 font-mono italic">
               <ShieldAlert size={28} className="text-zinc-700 mb-2.5" />
               <span>Select any archived incident spec line from the ledger index to inspect deeper forensic metadata and add researchers notes.</span>
             </div>
